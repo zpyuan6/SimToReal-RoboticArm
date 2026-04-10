@@ -1,0 +1,18 @@
+baselines:
+  - no_adaptation
+  - domain_randomization_only
+  - input_normalization
+  - few_shot_finetuning
+  - ours
+
+ablations:
+  - no_context_adapter
+  - no_action_conditioning
+  - no_temporal_consistency
+  - encoder_only
+  - adapter_only
+  - encoder_and_adapter
+  - probe_count_0
+  - probe_count_2
+  - probe_count_5
+  - probe_count_10

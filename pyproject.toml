@@ -1,0 +1,32 @@
+[project]
+name = "ttla-roarm"
+version = "0.1.0"
+description = "Test-time latent adaptation for calibration-light sim-to-real transfer on low-cost embodied robots."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "mujoco>=3.2.0",
+  "numpy>=1.26",
+  "opencv-python>=4.10",
+  "pandas>=2.2",
+  "matplotlib>=3.9",
+  "seaborn>=0.13",
+  "pyyaml>=6.0",
+  "torch>=2.4",
+  "torchvision>=0.19",
+  "tqdm>=4.66",
+  "scikit-learn>=1.5",
+  "scipy>=1.14",
+  "imageio>=2.35",
+  "pyserial>=3.5",
+]
+
+[tool.uv]
+package = true
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"

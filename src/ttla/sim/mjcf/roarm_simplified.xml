@@ -1,0 +1,160 @@
+<mujoco model="roarm_simplified">
+  <compiler angle="degree" coordinate="local"/>
+  <option timestep="0.01" gravity="0 0 -9.81" integrator="implicitfast"/>
+  <visual>
+    <global offwidth="512" offheight="512"/>
+  </visual>
+  <default>
+    <joint damping="1.5" armature="0.02" limited="true"/>
+    <geom rgba="0.5 0.5 0.5 1" friction="0.8 0.1 0.1" contype="1" conaffinity="1"/>
+    <position kp="45"/>
+    <default class="visual">
+      <geom type="mesh" contype="0" conaffinity="0" density="0" group="2"/>
+    </default>
+    <default class="collision">
+      <geom rgba="0 0 0 0" contype="1" conaffinity="1"/>
+    </default>
+  </default>
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" width="256" height="256"
+      rgb1="0.65 0.65 0.65" rgb2="0.45 0.45 0.45"/>
+    <material name="table_mat" texture="grid" texrepeat="2 2"/>
+    <material name="silver_mat" rgba="0.78 0.79 0.82 1" specular="0.6" shininess="0.7"/>
+    <material name="graphite_mat" rgba="0.18 0.19 0.21 1" specular="0.35" shininess="0.35"/>
+    <material name="carbon_mat" rgba="0.12 0.13 0.15 1" specular="0.25" shininess="0.18"/>
+    <material name="black_plastic_mat" rgba="0.08 0.08 0.09 1" specular="0.08" shininess="0.08"/>
+    <material name="camera_board_mat" rgba="0.14 0.14 0.16 1" specular="0.18" shininess="0.12"/>
+    <material name="bracket_mat" rgba="0.14 0.14 0.15 1" specular="0.22" shininess="0.18"/>
+    <material name="lens_mat" rgba="0.04 0.07 0.10 1" specular="0.95" shininess="0.95"/>
+    <material name="led_housing_mat" rgba="0.10 0.10 0.11 1" specular="0.25" shininess="0.2"/>
+    <material name="led_lens_mat" rgba="1.0 0.88 0.46 1" emission="0.45" specular="0.12" shininess="0.08"/>
+    <material name="accent_gold_mat" rgba="0.78 0.63 0.21 1" specular="0.45" shininess="0.5"/>
+    <mesh name="base_link_mesh" file="../assets/meshes/roarm_m3/base_link.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="link1_mesh" file="../assets/meshes/roarm_m3/link1.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="link2_mesh" file="../assets/meshes/roarm_m3/link2.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="link3_mesh" file="../assets/meshes/roarm_m3/link3.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="link4_mesh" file="../assets/meshes/roarm_m3/link4.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="link5_mesh" file="../assets/meshes/roarm_m3/link5.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="gripper_link_mesh" file="../assets/meshes/roarm_m3/gripper_link.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="camera_bracket_mesh" file="../assets/meshes/roarm_m3/camera_bracket.obj" scale="0.001 0.001 0.001"/>
+  </asset>
+  <worldbody>
+    <light name="key" pos="0.0 0.0 1.8" dir="0 0 -1"/>
+    <light name="fill" pos="0.75 -0.45 0.95" dir="-0.45 0.20 -1" diffuse="0.45 0.45 0.48" specular="0.06 0.06 0.06" castshadow="false"/>
+    <camera name="overview_cam" pos="0.60 -0.65 0.48" xyaxes="0.77 0.64 0.00 -0.28 0.33 0.90" fovy="48"/>
+    <geom name="floor" type="plane" size="2 2 0.1" rgba="0.95 0.95 0.95 1"/>
+    <body name="table" pos="0.35 0 0.02">
+      <geom name="table_geom" type="box" size="0.30 0.40 0.02" material="table_mat"/>
+    </body>
+
+    <!-- Official RoArm-M3 kinematic lengths are adapted from the Waveshare ROS model:
+         base height 0.0701 m, shoulder offset 0.051959 m,
+         upper-arm 0.236815/0.030002 m, forearm 0.144586 m,
+         wrist offset 0.015147/0.053653 m, tool reach 0.115428 m. -->
+    <body name="base" pos="0 0 0.0701">
+      <joint name="base_yaw" type="hinge" axis="0 0 1" range="-180 180"/>
+      <geom class="visual" mesh="base_link_mesh" material="graphite_mat"/>
+      <geom class="collision" type="cylinder" size="0.055 0.035" pos="0 0 -0.035"/>
+      <geom class="collision" type="box" size="0.065 0.055 0.020" pos="0 0 0.010"/>
+      <geom type="cylinder" size="0.005 0.020" pos="0.048 0.044 -0.020" material="accent_gold_mat" contype="0" conaffinity="0" density="0"/>
+      <geom type="cylinder" size="0.005 0.020" pos="-0.048 0.044 -0.020" material="accent_gold_mat" contype="0" conaffinity="0" density="0"/>
+      <geom type="cylinder" size="0.005 0.020" pos="0.048 -0.044 -0.020" material="accent_gold_mat" contype="0" conaffinity="0" density="0"/>
+      <geom type="cylinder" size="0.005 0.020" pos="-0.048 -0.044 -0.020" material="accent_gold_mat" contype="0" conaffinity="0" density="0"/>
+
+      <body name="link1" pos="0 0 0">
+        <geom class="visual" mesh="link1_mesh" material="graphite_mat"/>
+        <geom class="collision" type="capsule" fromto="0 0 0 0 0 0.051959" size="0.022"/>
+
+        <body name="shoulder_mount" pos="0 0 0.051959" quat="-0.49999816 0.5 0.5 0.50000184">
+          <body name="link2" pos="0 0 0">
+            <joint name="shoulder_pitch" type="hinge" axis="0 0 1" range="-90 90"/>
+            <geom class="visual" mesh="link2_mesh" material="carbon_mat"/>
+            <geom class="collision" type="capsule" fromto="0 0 0 0.236815 0.030002 0" size="0.018"/>
+            <geom class="collision" type="sphere" size="0.026" pos="0 0 0"/>
+
+            <body name="elbow_mount" pos="0.236815 0.030002 0" quat="0.70710548 0 0 0.70710808">
+              <body name="link3" pos="0 0 0">
+                <joint name="elbow_pitch" type="hinge" axis="0 0 1" range="-57.2958 169.0228"/>
+                <geom class="visual" mesh="link3_mesh" material="graphite_mat"/>
+                <geom class="collision" type="capsule" fromto="0 0 0 0 -0.144586 0" size="0.016"/>
+                <geom class="collision" type="sphere" size="0.024" pos="0 0 0"/>
+
+                <!-- AI Kit camera holder: the official accessory drawing lists a 21 mm wide plate with 13.5 mm hole spacing.
+                     Product images show the bracket mounted on the top of the forearm near the elbow, with the camera looking
+                     forward toward the gripper and slightly downward. -->
+                <body name="forearm_camera_mount" pos="-0.06 -0.048 0" euler="180 0 75">
+                  <!-- Holder rebuilt from the official accessory drawing: 21 mm top width, 13.5 mm vertical hole spacing,
+                       and about 50 mm overall plate height. Thickness is lightly simplified for visibility. -->
+                  <geom type="mesh" mesh="camera_bracket_mesh" pos="0 0.010 0" material="bracket_mat" contype="0" conaffinity="0" density="0"/>
+                  <geom type="box" size="0.0105 0.0125 0.0025" pos="0.004 0.018 0" quat="0.70710678 0 0.70710678 0" material="camera_board_mat" contype="0" conaffinity="0" density="0"/>
+                  <geom type="cylinder" size="0.006 0.004" pos="0.014 0.018 0" quat="0.70710678 0 0.70710678 0" material="lens_mat" contype="0" conaffinity="0" density="0"/>
+                  <geom type="cylinder" size="0.0014 0.0016" pos="0.0016 0.02475 0.0075" quat="0.70710678 0 0.70710678 0" material="silver_mat" contype="0" conaffinity="0" density="0"/>
+                  <geom type="cylinder" size="0.0014 0.0016" pos="0.0016 0.02475 -0.0075" quat="0.70710678 0 0.70710678 0" material="silver_mat" contype="0" conaffinity="0" density="0"/>
+                  <geom type="cylinder" size="0.0014 0.0016" pos="0.0016 0.01125 0.0075" quat="0.70710678 0 0.70710678 0" material="silver_mat" contype="0" conaffinity="0" density="0"/>
+                  <geom type="cylinder" size="0.0014 0.0016" pos="0.0016 0.01125 -0.0075" quat="0.70710678 0 0.70710678 0" material="silver_mat" contype="0" conaffinity="0" density="0"/>
+                  <camera name="forearm_cam" pos="0.026 0.046 0" euler="0 -90 0" fovy="100"/>
+                </body>
+
+                <body name="wrist_pitch_mount" pos="0 -0.144586 0">
+                  <body name="link4" pos="0 0 0">
+                    <joint name="wrist_pitch" type="hinge" axis="0 0 1" range="-90 90"/>
+                    <geom class="visual" mesh="link4_mesh" material="graphite_mat"/>
+                    <geom class="collision" type="capsule" fromto="0 0 0 0.015147 -0.053653 0" size="0.013"/>
+                    <geom class="collision" type="sphere" size="0.020" pos="0 0 0"/>
+
+                    <body name="wrist_roll_mount" pos="0.015147 -0.053653 0" quat="-0.49999816 -0.5 -0.5 0.50000184">
+                      <body name="link5" pos="0 0 0">
+                        <joint name="wrist_roll" type="hinge" axis="0 0 1" range="-180 180"/>
+                        <geom class="visual" mesh="link5_mesh" material="black_plastic_mat"/>
+                        <geom class="collision" type="capsule" fromto="0 0 0 0 0 0.052035" size="0.011"/>
+                        <geom class="collision" type="sphere" size="0.016" pos="0 0 0"/>
+
+                        <body name="hand_tcp" pos="0 0 0.115428" quat="0.49999816 0.5 -0.5 0.50000184">
+                          <site name="ee_site" pos="0 0 0" size="0.0005" rgba="0 0 0 0"/>
+                        </body>
+
+                        <body name="gripper_mount" pos="0 0.018821 0.052035" quat="-0.49999816 0.5 0.5 0.50000184">
+                          <body name="gripper_link" pos="0 0 0">
+                            <joint name="gripper_open" type="hinge" axis="0 0 1" range="0 85.9437"/>
+                            <geom class="visual" mesh="gripper_link_mesh" material="black_plastic_mat"/>
+                            <geom class="collision" type="box" size="0.014 0.032 0.010" pos="0 0 0.030"/>
+                            <geom class="collision" type="box" size="0.006 0.012 0.030" pos="0 0.018 0.056"/>
+                            <geom class="collision" type="box" size="0.006 0.012 0.030" pos="0 -0.018 0.056"/>
+
+                            <!-- The official appearance image shows a single LED lamp on one side of the gripper nose. -->
+                            <body name="gripper_led" pos="0.032 -0.022 -0.019">
+                              <geom type="cylinder" size="0.010 0.006" quat="0.70710678 0 0.70710678 0" material="led_housing_mat" contype="0" conaffinity="0" density="0"/>
+                              <geom type="cylinder" size="0.007 0.0028" pos="0.008 0 0" quat="0.70710678 0 0.70710678 0" material="led_lens_mat" contype="0" conaffinity="0" density="0"/>
+                              <light name="gripper_led_light" pos="0.008 0 0" dir="1 0 0" directional="false" cutoff="34" exponent="14"
+                                diffuse="0.92 0.84 0.60" specular="0.08 0.08 0.08" attenuation="0.10 0 1.10" castshadow="false"/>
+                            </body>
+                          </body>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <body name="target" pos="0.30 0.08 0.08">
+      <geom name="target_geom" type="box" size="0.018 0.018 0.018" rgba="0.95 0.2 0.2 1"/>
+      <site name="target_site" pos="0 0 0" size="0.009" rgba="1 0 0 1"/>
+    </body>
+    <body name="distractor" pos="0.28 -0.12 0.08">
+      <geom type="box" size="0.015 0.015 0.025" rgba="0.2 0.2 0.85 1"/>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="a_base" joint="base_yaw" ctrlrange="-3.1416 3.1416"/>
+    <position name="a_shoulder" joint="shoulder_pitch" ctrlrange="-1.5708 1.5708"/>
+    <position name="a_elbow" joint="elbow_pitch" ctrlrange="-1.0 2.95"/>
+    <position name="a_wrist_pitch" joint="wrist_pitch" ctrlrange="-1.5708 1.5708"/>
+    <position name="a_wrist_roll" joint="wrist_roll" ctrlrange="-3.1416 3.1416"/>
+    <position name="a_gripper" joint="gripper_open" ctrlrange="0 1.5"/>
+  </actuator>
+</mujoco>

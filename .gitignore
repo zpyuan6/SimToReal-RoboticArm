@@ -1,0 +1,60 @@
+.venv/
+.uv-cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+build/
+dist/
+
+Thumbs.db
+.DS_Store
+
+# Local scratch / downloads
+tmp/
+
+# Generated datasets and logs
+data/
+results/
+figures/
+
+# Keep only experiment configs, ignore any local experiment artifacts
+experiments/*
+!experiments/configs/
+!experiments/configs/**
+
+# Exclude manuscript sources and generated paper assets from the code repo
+manuscript/
+
+# Media and document artifacts anywhere in the tree
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.svg
+*.webp
+*.pdf
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.npz
+*.npy
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.csv
+*.tsv
+*.parquet
+*.jsonl
+*.log

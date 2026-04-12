@@ -145,8 +145,8 @@
       <geom name="target_geom" type="box" size="0.018 0.018 0.018" rgba="0.95 0.2 0.2 1"/>
       <site name="target_site" pos="0 0 0" size="0.009" rgba="1 0 0 1"/>
     </body>
-    <body name="distractor" pos="0.28 -0.12 0.08">
-      <geom type="box" size="0.015 0.015 0.025" rgba="0.2 0.2 0.85 1"/>
+    <body name="distractor" pos="0.28 -0.12 0.045">
+      <geom name="dropzone_geom" type="box" size="0.050 0.050 0.005" rgba="0.15 0.35 0.95 1"/>
     </body>
   </worldbody>
   <actuator>

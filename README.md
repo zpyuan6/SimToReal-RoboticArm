@@ -2,20 +2,20 @@
 
 This repository contains a reproducible minimal research pipeline for:
 
-- simulation-first training of short-horizon visual skills,
-- action-conditioned test-time latent/context adaptation,
+- simulation-first training of short-horizon primitive policies,
+- adapter-only real-world latent calibration,
 - pseudo-real and real-robot evaluation on Waveshare RoArm-M3-S,
 - result plotting and an IEEE Transactions on Consumer Electronics manuscript draft.
 
 ## Scope
 
-The project targets three short-horizon desktop tasks:
+The project targets three primitive-level desktop tasks:
 
-- target reaching / approach,
-- target verification,
-- observe-then-act.
+- `level1_verify`: observation and verification,
+- `level2_approach`: observation, pre-alignment, and approach,
+- `level3_pick_place`: reobserve, pregrasp servo, grasp, lift, move, and place.
 
-The method treats sim-to-real transfer as online identification of a hidden embodiment context. The policy is trained in simulation and frozen at deployment. Only a lightweight context state is updated online.
+The method trains an encoder, a primitive-selection policy, and an action-conditioned transition model in simulation. At deployment, the backbone stays frozen and only a lightweight adapter is calibrated so real observations map back into the simulation latent space.
 
 ## Simulated Device
 
@@ -50,7 +50,7 @@ This creates the project virtual environment and installs the pinned dependencie
 If you want to verify that MuJoCo and the simulator import correctly before training, run:
 
 ```bash
-uv run python scripts/play_env.py --config configs/base.yaml --mode expert --task approach --disable-gui --save-dir results/replays/smoke
+uv run python scripts/play_env.py --config configs/base.yaml --mode expert --task level1_verify --disable-gui --save-dir results/replays/smoke
 ```
 
 ## Simulator Visualization
@@ -58,14 +58,14 @@ uv run python scripts/play_env.py --config configs/base.yaml --mode expert --tas
 If you only want one command to inspect the simulator, use:
 
 ```bash
-uv run python scripts/play_env_viewer.py --config configs/base.yaml --mode manual --task approach
+uv run python scripts/play_env_viewer.py --config configs/base.yaml --mode manual --task level1_verify
 ```
 
 This is the recommended visualization entry point for this repository because it combines:
 
 - the MuJoCo native 3D viewer,
 - the TTLA task loop,
-- manual keyboard control,
+- manual primitive keyboard control,
 - and the forearm camera feed.
 
 There are three different simulator visualization modes in this repository. They look similar, but their interaction model is different.
@@ -75,7 +75,7 @@ There are three different simulator visualization modes in this repository. They
 Use this when you want a native MuJoCo-looking window and still want to run our task and policy loop.
 
 ```bash
-uv run python scripts/play_env_viewer.py --config configs/base.yaml --mode manual --task approach --save-dir results/replays/viewer_demo
+uv run python scripts/play_env_viewer.py --config configs/base.yaml --mode manual --task level2_approach --save-dir results/replays/viewer_demo
 ```
 
 This mode uses the native MuJoCo viewer as the main window and overlays TTLA status information on top of it.
@@ -92,34 +92,41 @@ Available commands:
 - manual mode:
 
 ```bash
-uv run python scripts/play_env_viewer.py --config configs/base.yaml --mode manual --task approach --save-dir results/replays/viewer_demo
+uv run python scripts/play_env_viewer.py --config configs/base.yaml --mode manual --task level2_approach --save-dir results/replays/viewer_demo
 ```
 
 - expert autoplay:
 
 ```bash
-uv run python scripts/play_env_viewer.py --config configs/base.yaml --mode expert --task observe_then_act --save-dir results/replays/viewer_expert_demo
+uv run python scripts/play_env_viewer.py --config configs/base.yaml --mode expert --task level3_pick_place --save-dir results/replays/viewer_expert_demo
 ```
 
 - policy autoplay:
 
 ```bash
-uv run python scripts/play_env_viewer.py --config configs/base.yaml --mode policy --baseline ours --checkpoint results/checkpoints/best_model.pt --task observe_then_act --save-dir results/replays/viewer_policy_demo
+uv run python scripts/play_env_viewer.py --config configs/base.yaml --mode policy --baseline ours --checkpoint results/checkpoints/best_model.pt --task level3_pick_place --save-dir results/replays/viewer_policy_demo
 ```
 
 - hide MuJoCo's left or right UI:
 
 ```bash
-uv run python scripts/play_env_viewer.py --config configs/base.yaml --mode manual --task approach --hide-left-ui --hide-right-ui
+uv run python scripts/play_env_viewer.py --config configs/base.yaml --mode manual --task level1_verify --hide-left-ui --hide-right-ui
 ```
 
-Script-level controls added by this mode:
+Primitive controls added by this mode:
 
-- `a` / `d`: scan left / right
-- `w` / `s`: lift / dip view
-- `e`: approach
-- `h`: hold
-- `x`: stop
+- `a` / `d` / `c`: observe left / right / center
+- `v`: verify target
+- `p`: prealign grasp
+- `e` / `r`: approach coarse / fine
+- `t`: retreat
+- `o`: reobserve
+- `g`: pregrasp servo
+- `f`: grasp execute
+- `l`: lift object
+- `m`: transport to dropzone
+- `y`: place object
+- `x`: abort
 - `n`: save current episode and reset
 - `q` or `Esc`: save and quit
 
@@ -169,42 +176,49 @@ Important note:
 Use this when you want the clearest task-oriented dashboard instead of the most native MuJoCo UI.
 
 ```bash
-uv run python scripts/play_env.py --config configs/base.yaml --mode manual --task approach --save-dir results/replays/manual_demo
+uv run python scripts/play_env.py --config configs/base.yaml --mode manual --task level2_approach --save-dir results/replays/manual_demo
 ```
 
-This player renders the forearm camera and an overview camera to a custom dashboard with action history, target distance, joint readout, and context bars.
+This player renders the forearm camera and an overview camera to a custom primitive dashboard with action history and task-state metrics.
 
 Available commands:
 
 - manual mode:
 
 ```bash
-uv run python scripts/play_env.py --config configs/base.yaml --mode manual --task approach --save-dir results/replays/manual_demo
+uv run python scripts/play_env.py --config configs/base.yaml --mode manual --task level2_approach --save-dir results/replays/manual_demo
 ```
 
 - expert autoplay:
 
 ```bash
-uv run python scripts/play_env.py --config configs/base.yaml --mode expert --task observe_then_act --save-dir results/replays/expert_demo
+uv run python scripts/play_env.py --config configs/base.yaml --mode expert --task level3_pick_place --save-dir results/replays/expert_demo
 ```
 
 - policy autoplay:
 
 ```bash
-uv run python scripts/play_env.py --config configs/base.yaml --mode policy --baseline ours --checkpoint results/checkpoints/best_model.pt --task observe_then_act --save-dir results/replays/ours_demo
+uv run python scripts/play_env.py --config configs/base.yaml --mode policy --baseline ours --checkpoint results/checkpoints/best_model.pt --task level3_pick_place --save-dir results/replays/ours_demo
 ```
 
 Dashboard controls:
 
-- `a` / `d`: scan left / right
-- `w` / `s`: lift / dip view
-- `e`: approach
-- `h`: hold
-- `x`: stop
+- `a` / `d` / `c`: observe left / right / center
+- `v`: verify target
+- `p`: prealign grasp
+- `e` / `r`: approach coarse / fine
+- `t`: retreat
+- `o`: reobserve
+- `g`: pregrasp servo
+- `f`: grasp execute
+- `l`: lift object
+- `m`: transport to dropzone
+- `y`: place object
+- `x`: abort
 - `n`: save current episode and reset
 - `q`: save and quit
 
-Manual mode is step-based: each key press triggers one skill macro and the scene updates after that step.
+Manual mode is step-based: each key press triggers one primitive.
 
 ### Replay
 
@@ -224,7 +238,7 @@ Replay controls:
 
 - Use `scripts/play_env_viewer.py` when you want the main recommended simulator entry point.
 - Use `python -m mujoco.viewer --mjcf ...` when you want the most native MuJoCo interaction and UI.
-- Use `scripts/play_env.py` when you want the clearest research dashboard and explicit forearm camera visualization.
+- Use `scripts/play_env.py` when you want the clearest primitive-task dashboard and explicit forearm camera visualization.
 
 ### Why Some Simulate Interactions Do Not Work In Scripted Modes
 
@@ -251,6 +265,61 @@ uv run python scripts/train_main.py --config configs/base.yaml
 uv run python scripts/run_experiments.py --config configs/base.yaml
 uv run python scripts/plot_results.py --config configs/base.yaml
 ```
+
+## Primitive Task Interface
+
+All current visualizers and training scripts assume a discrete primitive policy. The three task levels share one primitive vocabulary:
+
+- Observation primitives:
+  - `obs_left`
+  - `obs_right`
+  - `obs_center`
+  - `verify_target`
+- Approach / recovery primitives:
+  - `prealign_grasp`
+  - `approach_coarse`
+  - `approach_fine`
+  - `retreat`
+  - `reobserve`
+- Manipulation primitives:
+  - `pregrasp_servo`
+  - `grasp_execute`
+  - `lift_object`
+  - `transport_to_dropzone`
+  - `place_object`
+- Termination primitive:
+  - `abort`
+
+Level-1 uses observation and verification only. Level-2 adds alignment and approach. Level-3 adds continuous closed-loop execution inside `pregrasp_servo`, `grasp_execute`, `lift_object`, `transport_to_dropzone`, and `place_object`, while the high-level policy still selects only a discrete primitive ID.
+
+## Controller Backbones
+
+The current codebase supports multiple policy backbones under the same `encoder -> policy -> transition -> adapter` method structure. Switch them by editing `model.backbone_type` in [configs/base.yaml](/F:/RoboticArm/configs/base.yaml).
+
+Supported values:
+
+- `feedforward`
+  - `z_t`: fused image-state latent for the current observation.
+  - `a_t`: current primitive ID.
+  - `T(z_t, a_t)`: one-step latent transition.
+- `recurrent`
+  - `z_t`: GRU hidden state after consuming the recent observation history.
+  - `a_t`: current primitive ID.
+  - `T(z_t, a_t)`: one-step latent transition from the recurrent latent.
+- `chunking`
+  - `z_t`: fused image-state latent for the current decision point.
+  - `a_t`: first primitive in the predicted primitive chunk.
+  - `T(z_t, a_t)`: one-step latent transition conditioned on the executed primitive, while the policy also predicts future primitive slots.
+- `language`
+  - `z_t`: fused image-state-task latent, where task identity is embedded as a lightweight language/task token.
+  - `a_t`: current primitive ID.
+  - `T(z_t, a_t)`: one-step latent transition.
+- `diffusion`
+  - `z_t`: fused image-state latent.
+  - `a_t`: primitive sampled by iterative denoising over a primitive action embedding.
+  - `T(z_t, a_t)`: one-step latent transition.
+
+The adapter and transition training logic remain the same across all backbones. Only the policy backbone changes.
 
 ## Real-Robot Workflow
 

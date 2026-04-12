@@ -10,11 +10,11 @@ sim:
   image_size: 84
   control_dt: 0.02
   action_repeat: 5
-  episode_horizon: 24
+  episode_horizon: 32
   tasks:
-    - approach
-    - verify
-    - observe_then_act
+    - level1_verify
+    - level2_approach
+    - level3_pick_place
   context:
     camera_jitter: 0.015
     fov_jitter: 6.0
@@ -28,39 +28,54 @@ sim:
     joint_bias: 0.09
 
 data:
-  train_episodes: 240
-  val_episodes: 60
-  test_episodes: 90
+  train_episodes: 1200
+  val_episodes: 240
+  test_episodes: 360
   real_probe_episodes: 18
 
 model:
+  backbone_type: feedforward
   image_channels: 3
-  state_dim: 19
-  action_dim: 7
-  latent_dim: 64
-  context_dim: 8
+  state_dim: 18
+  action_dim: 15
+  action_residual_dim: 6
+  latent_dim: 128
   hidden_dim: 128
+  context_dim: 1
+  action_embed_dim: 16
+  task_embed_dim: 16
+  history_len: 4
+  chunk_size: 3
+  task_vocab_size: 3
+  transition_stage_bins: 4
+  language_dim: 32
+  diffusion_steps: 4
+  diffusion_dim: 32
+  adapter_hidden_dim: 64
+  adapter_scale: 0.1
+  residual_scale: 0.0
 
 train:
   batch_size: 16
-  epochs: 12
+  epochs: 8
   lr: 0.001
+  min_lr: 0.00005
   weight_decay: 0.0001
   device: cpu
-  policy_loss_weight: 1.0
-  transition_loss_weight: 1.0
-  temporal_loss_weight: 0.2
-  context_smooth_weight: 0.05
-  context_penalty_weight: 0.01
+  transition_loss_weight: 0.5
+  use_weighted_sampler: true
+  primitive_balance_power: 0.0
+  success_sample_boost: 2.0
+  level3_success_boost: 6.0
+  level3_late_primitive_boost: 1.0
+  normalize_task_mass_after_boost: true
 
 adaptation:
-  lr: 0.03
-  steps_per_update: 3
-  probe_steps: 4
-  temporal_weight: 0.2
-  transition_weight: 1.0
-  context_penalty_weight: 0.02
+  lr: 0.0005
+  epochs: 8
+  batch_size: 8
+  adapter_reg_weight: 0.1
 
 evaluation:
-  episodes_per_task: 24
+  episodes_per_task: 96
   report_name: summary.csv

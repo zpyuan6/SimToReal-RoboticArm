@@ -6,71 +6,75 @@ import numpy as np
 import pandas as pd
 import torch
 
-from ..adaptation import OnlineContextAdapter
-from ..models import TTLAModel
+from ..models import BaseTTLAModel
 from ..sim import RoArmSimEnv
-from ..sim.context import context_vector, sample_context
-from ..sim.expert import ScriptedExpert
+from ..sim.task_defs import TASK_TO_ID
+from ..training import build_model
 from .baselines import baseline_overrides
 
 
 @torch.no_grad()
-def _select_action(model: TTLAModel, obs: dict, context: torch.Tensor, device: torch.device) -> tuple[int, torch.Tensor]:
+def _select_primitive(
+    model: BaseTTLAModel,
+    obs: dict,
+    runtime_state,
+    use_adapter: bool,
+    device: torch.device,
+    task_id: int,
+) -> tuple[int, object]:
     image = torch.from_numpy(obs["image"]).permute(2, 0, 1).unsqueeze(0).float().to(device) / 255.0
     state = torch.from_numpy(obs["state"]).unsqueeze(0).float().to(device)
-    z = model.encode(image, state)
-    logits = model.predict_action(model.adapted_latent(z, context), context)
-    return int(logits.argmax(dim=-1).item()), z
+    task_ids = torch.tensor([task_id], device=device, dtype=torch.long)
+    primitive, runtime_state, _ = model.act(image, state, runtime_state, use_adapter=use_adapter, task_ids=task_ids)
+    return int(primitive.item()), runtime_state
 
 
 def evaluate_checkpoint(cfg: dict, checkpoint_path: str | Path, baseline_name: str, output_path: str | Path) -> Path:
     device = torch.device(cfg["train"]["device"])
     payload = torch.load(checkpoint_path, map_location=device)
-    model = TTLAModel(
-        state_dim=cfg["model"]["state_dim"],
-        action_dim=cfg["model"]["action_dim"],
-        latent_dim=cfg["model"]["latent_dim"],
-        context_dim=cfg["model"]["context_dim"],
-        hidden_dim=cfg["model"]["hidden_dim"],
-    ).to(device)
+    model = build_model(cfg).to(device)
     model.load_state_dict(payload["model_state"])
     model.eval()
     env = RoArmSimEnv(cfg["sim"], seed=cfg["seed"] + 101)
     baseline_cfg = baseline_overrides(baseline_name)
-    adapter = OnlineContextAdapter(model, cfg["adaptation"], device)
     records: list[dict] = []
-    expert = ScriptedExpert()
     for task_name in cfg["sim"]["tasks"]:
         for ep in range(cfg["evaluation"]["episodes_per_task"]):
-            context = sample_context(env.context_cfg, env.rng)
-            context["fov_bias"] *= 1.6
-            context["action_gain"] = float(np.clip(context["action_gain"] * 1.12, 0.7, 1.35))
-            context["joint_bias"] *= 1.5
-            context["noise_std"] *= 1.4
-            context["blur_sigma"] *= 1.3
-            obs = env.reset(task_name=task_name, context=context)
-            adapter.reset()
-            if baseline_cfg.get("adapt", False):
-                adapter.context = torch.from_numpy(context_vector(env.context)).unsqueeze(0).float().to(device)
+            obs = env.reset(task_name=task_name)
+            runtime_state = model.init_runtime_state(batch_size=1, device=device)
             success = 0
-            info = {"visibility": 0.0}
+            info = {
+                "visibility": 0.0,
+                "center_error": 0.0,
+                "verified": 0,
+                "grasped": 0,
+                "lifted": 0,
+                "placed": 0,
+                "ee_target_distance": float("nan"),
+                "dropzone_distance": float("nan"),
+            }
+            ever_verified = 0
+            ever_grasped = 0
+            ever_lifted = 0
+            ever_placed = 0
             for step in range(cfg["sim"]["episode_horizon"]):
-                if baseline_cfg.get("input_norm"):
-                    obs["image"] = _normalize_image(obs["image"])
-                action, z = _select_action(model, obs, adapter.context, device)
-                if baseline_cfg.get("fewshot") and ep < 2:
-                    action = expert.act(env)
-                    image = torch.from_numpy(obs["image"]).permute(2, 0, 1).unsqueeze(0).float().to(device) / 255.0
-                    state = torch.from_numpy(obs["state"]).unsqueeze(0).float().to(device)
-                    z = model.encode(image, state)
-                next_obs, _, done, info = env.step(action)
-                next_image_t = torch.from_numpy(next_obs["image"]).permute(2, 0, 1).unsqueeze(0).float().to(device) / 255.0
-                next_state_t = torch.from_numpy(next_obs["state"]).unsqueeze(0).float().to(device)
-                next_z = model.encode(next_image_t, next_state_t)
-                if baseline_cfg.get("adapt", False):
-                    adapter.adapt(z, action, next_z)
+                if baseline_cfg.get("input_norm", False):
+                    obs = {**obs, "image": _normalize_image(obs["image"])}
+                primitive_id, runtime_state = _select_primitive(
+                    model,
+                    obs,
+                    runtime_state,
+                    baseline_cfg.get("use_adapter", False),
+                    device,
+                    TASK_TO_ID[task_name],
+                )
+                next_obs, _, done, info = env.step(primitive_id)
                 obs = next_obs
                 success = info["success"]
+                ever_verified = max(ever_verified, int(info.get("verified", 0)))
+                ever_grasped = max(ever_grasped, int(info.get("grasped", 0)))
+                ever_lifted = max(ever_lifted, int(info.get("lifted", 0)))
+                ever_placed = max(ever_placed, int(info.get("placed", 0)))
                 if done:
                     break
             records.append(
@@ -81,11 +85,19 @@ def evaluate_checkpoint(cfg: dict, checkpoint_path: str | Path, baseline_name: s
                     "success": success,
                     "steps": step + 1,
                     "visibility": info["visibility"],
+                    "center_error": info["center_error"],
+                    "verified": ever_verified,
+                    "grasped": ever_grasped,
+                    "lifted": ever_lifted,
+                    "placed": ever_placed,
+                    "final_ee_target_distance": info["ee_target_distance"],
+                    "final_dropzone_distance": info["dropzone_distance"],
                 }
             )
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame.from_records(records).to_csv(output, index=False)
+    env.close()
     return output
 
 

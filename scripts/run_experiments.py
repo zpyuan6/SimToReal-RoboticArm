@@ -14,6 +14,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--checkpoint", default="results/checkpoints/best_model.pt")
+    parser.add_argument("--adapter-checkpoint", default="results/checkpoints/adapter_calibrated.pt")
     args = parser.parse_args()
     cfg = load_config(args.config)
     baselines = ["no_adaptation", "domain_randomization_only", "input_normalization", "few_shot_finetuning", "ours"]
@@ -21,7 +22,8 @@ def main() -> None:
     csv_paths = []
     for baseline in baselines:
         csv_path = Path(results_root) / f"{baseline}.csv"
-        evaluate_checkpoint(cfg, args.checkpoint, baseline, csv_path)
+        model_path = args.adapter_checkpoint if baseline == "ours" else args.checkpoint
+        evaluate_checkpoint(cfg, model_path, baseline, csv_path)
         csv_paths.append(csv_path)
     merged = pd.concat([pd.read_csv(path) for path in csv_paths], ignore_index=True)
     merged.to_csv(Path(results_root) / cfg["evaluation"]["report_name"], index=False)

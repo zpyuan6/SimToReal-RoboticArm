@@ -27,6 +27,7 @@ class EpisodeBuffer:
         context: np.ndarray,
         reward: float,
         info: dict[str, Any],
+        action_residual: np.ndarray | None = None,
     ) -> None:
         self.frames.append(frame.copy())
         self.states.append(state.copy())

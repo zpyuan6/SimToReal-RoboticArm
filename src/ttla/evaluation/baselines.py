@@ -3,13 +3,13 @@ from __future__ import annotations
 
 def baseline_overrides(name: str) -> dict:
     if name == "no_adaptation":
-        return {"adapt": False, "randomization": False, "fewshot": False}
+        return {"use_adapter": False, "input_norm": False}
     if name == "domain_randomization_only":
-        return {"adapt": False, "randomization": True, "fewshot": False}
+        return {"use_adapter": False, "input_norm": False}
     if name == "input_normalization":
-        return {"adapt": False, "input_norm": True, "randomization": True, "fewshot": False}
+        return {"use_adapter": False, "input_norm": True}
     if name == "few_shot_finetuning":
-        return {"adapt": False, "randomization": True, "fewshot": True}
+        return {"use_adapter": False, "input_norm": False}
     if name == "ours":
-        return {"adapt": True, "randomization": True, "fewshot": False}
+        return {"use_adapter": True, "input_norm": False}
     raise KeyError(name)

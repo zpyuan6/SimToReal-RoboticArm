@@ -37,20 +37,32 @@ model:
   backbone_type: feedforward
   image_channels: 3
   state_dim: 18
-  action_dim: 15
+  action_dim: 16
   action_residual_dim: 6
   latent_dim: 128
   hidden_dim: 128
   context_dim: 1
   action_embed_dim: 16
   task_embed_dim: 16
+  task_prior_scale: 1.2
+  stage_prior_scale: 0.8
+  predicted_stage_prior_scale: 0.6
+  use_prev_action_context: true
   history_len: 4
-  chunk_size: 3
+  chunk_size: 2
   task_vocab_size: 3
   transition_stage_bins: 4
+  stage_aux_classes: 8
   language_dim: 32
   diffusion_steps: 4
   diffusion_dim: 32
+  prev_action_dropout: 0.35
+  chunk_future_weight: 0.1
+  chunk_temporal_agg: false
+  chunk_temporal_decay: 0.35
+  recurrent_use_prev_action: true
+  recurrent_runtime_horizon: 6
+  recurrent_sequence_final_weight: 2.0
   adapter_hidden_dim: 64
   adapter_scale: 0.1
   residual_scale: 0.0
@@ -64,10 +76,13 @@ train:
   device: cpu
   transition_loss_weight: 0.5
   use_weighted_sampler: true
-  primitive_balance_power: 0.0
+  primitive_balance_power: 0.75
+  stage_balance_power: 0.65
   success_sample_boost: 2.0
   level3_success_boost: 6.0
-  level3_late_primitive_boost: 1.0
+  level3_late_primitive_boost: 2.0
+  level3_transport_stage_boost: 1.5
+  stage_loss_weight: 0.25
   normalize_task_mass_after_boost: true
 
 adaptation:

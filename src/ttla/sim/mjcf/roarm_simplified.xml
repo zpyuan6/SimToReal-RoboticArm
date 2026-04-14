@@ -29,6 +29,10 @@
     <material name="led_housing_mat" rgba="0.10 0.10 0.11 1" specular="0.25" shininess="0.2"/>
     <material name="led_lens_mat" rgba="1.0 0.88 0.46 1" emission="0.45" specular="0.12" shininess="0.08"/>
     <material name="accent_gold_mat" rgba="0.78 0.63 0.21 1" specular="0.45" shininess="0.5"/>
+    <material name="cork_mat" rgba="0.70 0.57 0.39 1" specular="0.08" shininess="0.05"/>
+    <material name="ear_wire_mat" rgba="0.37 0.22 0.10 1" specular="0.06" shininess="0.04"/>
+    <material name="bow_mat" rgba="0.78 0.16 0.18 1" specular="0.10" shininess="0.08"/>
+    <material name="face_mat" rgba="0.08 0.08 0.08 1" specular="0.02" shininess="0.02"/>
     <mesh name="base_link_mesh" file="../assets/meshes/roarm_m3/base_link.stl" scale="0.001 0.001 0.001"/>
     <mesh name="link1_mesh" file="../assets/meshes/roarm_m3/link1.stl" scale="0.001 0.001 0.001"/>
     <mesh name="link2_mesh" file="../assets/meshes/roarm_m3/link2.stl" scale="0.001 0.001 0.001"/>
@@ -114,20 +118,18 @@
                         </body>
 
                         <body name="gripper_mount" pos="0 0.018821 0.052035" quat="-0.49999816 0.5 0.5 0.50000184">
+                          <body name="gripper_led" pos="0.032 -0.022 -0.019">
+                            <geom type="cylinder" size="0.010 0.006" quat="0.70710678 0 0.70710678 0" material="led_housing_mat" contype="0" conaffinity="0" density="0"/>
+                            <geom type="cylinder" size="0.007 0.0028" pos="0.008 0 0" quat="0.70710678 0 0.70710678 0" material="led_lens_mat" contype="0" conaffinity="0" density="0"/>
+                            <light name="gripper_led_light" pos="0.008 0 0" dir="1 0 0" directional="false" cutoff="34" exponent="14"
+                              diffuse="0.92 0.84 0.60" specular="0.08 0.08 0.08" attenuation="0.10 0 1.10" castshadow="false"/>
+                          </body>
                           <body name="gripper_link" pos="0 0 0">
                             <joint name="gripper_open" type="hinge" axis="0 0 1" range="0 85.9437"/>
                             <geom class="visual" mesh="gripper_link_mesh" material="black_plastic_mat"/>
-                            <geom class="collision" type="box" size="0.014 0.032 0.010" pos="0 0 0.030"/>
-                            <geom class="collision" type="box" size="0.006 0.012 0.030" pos="0 0.018 0.056"/>
-                            <geom class="collision" type="box" size="0.006 0.012 0.030" pos="0 -0.018 0.056"/>
-
-                            <!-- The official appearance image shows a single LED lamp on one side of the gripper nose. -->
-                            <body name="gripper_led" pos="0.032 -0.022 -0.019">
-                              <geom type="cylinder" size="0.010 0.006" quat="0.70710678 0 0.70710678 0" material="led_housing_mat" contype="0" conaffinity="0" density="0"/>
-                              <geom type="cylinder" size="0.007 0.0028" pos="0.008 0 0" quat="0.70710678 0 0.70710678 0" material="led_lens_mat" contype="0" conaffinity="0" density="0"/>
-                              <light name="gripper_led_light" pos="0.008 0 0" dir="1 0 0" directional="false" cutoff="34" exponent="14"
-                                diffuse="0.92 0.84 0.60" specular="0.08 0.08 0.08" attenuation="0.10 0 1.10" castshadow="false"/>
-                            </body>
+                            <geom name="gripper_palm_geom" class="collision" type="box" size="0.014 0.032 0.010" pos="0 0 0.030"/>
+                            <geom name="gripper_upper_finger_geom" class="collision" type="box" size="0.006 0.012 0.030" pos="0 0.018 0.056"/>
+                            <geom name="gripper_lower_finger_geom" class="collision" type="box" size="0.006 0.012 0.030" pos="0 -0.018 0.056"/>
                           </body>
                         </body>
                       </body>
@@ -141,9 +143,28 @@
       </body>
     </body>
 
-    <body name="target" pos="0.30 0.08 0.08">
-      <geom name="target_geom" type="box" size="0.018 0.018 0.018" rgba="0.95 0.2 0.2 1"/>
-      <site name="target_site" pos="0 0 0" size="0.009" rgba="1 0 0 1"/>
+    <body name="target" pos="0.30 0.08 0.040">
+      <geom name="target_body_lower" type="cylinder" size="0.010 0.0115" pos="0 0 0.0115" material="cork_mat"/>
+      <geom name="target_body_upper" type="cylinder" size="0.0125 0.009" pos="0 0 0.032" material="cork_mat"/>
+      <geom name="target_body_neck" type="sphere" size="0.0105" pos="0 0 0.021" material="cork_mat"/>
+      <geom name="target_left_ear_front" type="capsule" fromto="0.006 0 0.040 0.035 0.005 0.080" size="0.0030" material="ear_wire_mat"/>
+      <geom name="target_left_ear_back" type="capsule" fromto="0.035 0.005 0.080 0.016 -0.007 0.044" size="0.0030" material="ear_wire_mat"/>
+      <geom name="target_right_ear_front" type="capsule" fromto="-0.006 0 0.040 -0.035 0.005 0.080" size="0.0030" material="ear_wire_mat"/>
+      <geom name="target_right_ear_back" type="capsule" fromto="-0.035 0.005 0.080 -0.016 -0.007 0.044" size="0.0030" material="ear_wire_mat"/>
+      <geom name="target_left_ear_front_contact" class="collision" type="capsule" fromto="0.006 0 0.040 0.035 0.005 0.080" size="0.0100"/>
+      <geom name="target_left_ear_back_contact" class="collision" type="capsule" fromto="0.035 0.005 0.080 0.016 -0.007 0.044" size="0.0100"/>
+      <geom name="target_right_ear_front_contact" class="collision" type="capsule" fromto="-0.006 0 0.040 -0.035 0.005 0.080" size="0.0100"/>
+      <geom name="target_right_ear_back_contact" class="collision" type="capsule" fromto="-0.035 0.005 0.080 -0.016 -0.007 0.044" size="0.0100"/>
+      <geom name="target_bow" type="box" size="0.010 0.0035 0.004" pos="0 -0.0105 0.010" material="bow_mat" euler="0 14 0"/>
+      <geom name="target_face_left_eye" type="sphere" size="0.0019" pos="0.0055 -0.0125 0.032" material="face_mat"/>
+      <geom name="target_face_right_eye" type="sphere" size="0.0019" pos="-0.0055 -0.0125 0.032" material="face_mat"/>
+      <geom name="target_face_nose" type="sphere" size="0.0018" pos="0 -0.0135 0.026" material="face_mat"/>
+      <site name="target_site" pos="0 0 0.027" size="0.010" rgba="1 0 0 1"/>
+      <site name="target_grasp_site" pos="0 0 0.060" size="0.006" rgba="0 1 0 0.2"/>
+      <site name="target_left_grasp_base" pos="0.018 0.001 0.056" size="0.006" rgba="0 1 0 0.20"/>
+      <site name="target_left_grasp_mid" pos="0.028 0.003 0.069" size="0.007" rgba="0 1 0 0.45"/>
+      <site name="target_right_grasp_base" pos="-0.018 0.001 0.056" size="0.006" rgba="0 1 0 0.20"/>
+      <site name="target_right_grasp_mid" pos="-0.028 0.003 0.069" size="0.007" rgba="0 1 0 0.45"/>
     </body>
     <body name="distractor" pos="0.28 -0.12 0.045">
       <geom name="dropzone_geom" type="box" size="0.050 0.050 0.005" rgba="0.15 0.35 0.95 1"/>

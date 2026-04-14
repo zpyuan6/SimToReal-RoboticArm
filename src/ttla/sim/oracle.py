@@ -7,6 +7,7 @@ from .skills import (
     APPROACH_COARSE_ID,
     APPROACH_FINE_ID,
     GRASP_EXECUTE_ID,
+    HOLD_POSITION_ID,
     LIFT_OBJECT_ID,
     OBS_CENTER_ID,
     OBS_LEFT_ID,
@@ -48,16 +49,16 @@ class PrimitiveOracle:
         if env.center_error_px() > 15.0:
             return self._observe_action(env)
         if env.verified:
-            return ABORT_ID
+            return HOLD_POSITION_ID
         return VERIFY_TARGET_ID
 
     def _act_level2(self, env) -> int:
+        if env.verified and env.approach_success_ready():
+            return HOLD_POSITION_ID
         if env.visibility_score() < 0.10:
             return self._observe_action(env)
         if env.center_error_px() > 14.0:
             return PREALIGN_GRASP_ID
-        if env.approach_success_ready():
-            return VERIFY_TARGET_ID
         if env.pregrasp_ready():
             if env.visibility_score() > 0.26:
                 return VERIFY_TARGET_ID
@@ -73,20 +74,22 @@ class PrimitiveOracle:
 
     def _act_level3(self, env) -> int:
         if env.placed:
-            return ABORT_ID
+            return HOLD_POSITION_ID
         if env.object_attached:
             if not env.lifted:
                 return LIFT_OBJECT_ID
-            if env.dropzone_distance() > 0.18:
+            if env._dropzone_xy_distance() > 0.085:
                 return TRANSPORT_TO_DROPZONE_ID
             return PLACE_OBJECT_ID
         if env.visibility_score() < 0.08:
             return REOBSERVE_ID
-        if env.visibility_score() > 0.16 and env.center_error_px() < 18.0 and env.ee_target_distance() < 0.15:
+        if env._ear_grasp_contact_count() > 0:
+            return GRASP_EXECUTE_ID
+        if env.visibility_score() > 0.20 and env.center_error_px() < 14.0 and env.ee_target_distance() < 0.075:
             return GRASP_EXECUTE_ID
         if not env.pregrasp_ready():
             return PREGRASP_SERVO_ID
-        if env.ee_target_distance() > 0.10:
+        if env.ee_target_distance() > 0.07:
             return PREGRASP_SERVO_ID
         return GRASP_EXECUTE_ID
 

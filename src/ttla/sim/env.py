@@ -17,6 +17,7 @@ from .skills import (
     DROPZONE_QPOS,
     GRASP_EXECUTE_ID,
     HOME_QPOS,
+    HOLD_POSITION_ID,
     LIFT_OBJECT_ID,
     OBS_CENTER_ID,
     OBS_LEFT_ID,
@@ -60,6 +61,7 @@ class RoArmSimEnv:
         self.obs_renderer = mujoco.Renderer(self.model, height=self.cfg["image_size"], width=self.cfg["image_size"])
         self.debug_size = max(256, int(self.cfg["image_size"]) * 4)
         self.debug_renderer = mujoco.Renderer(self.model, height=self.debug_size, width=self.debug_size)
+        self._cache_contact_ids()
         self.context_cfg = ContextConfig(**sim_cfg["context"])
         self.action_delay_queue: deque[np.ndarray] = deque()
         self.task_name = self.cfg["tasks"][0]
@@ -70,19 +72,38 @@ class RoArmSimEnv:
         self.placed = False
         self.lifted = False
         self.last_primitive = OBS_CENTER_ID
-        self.object_grasp_offset = np.asarray([0.0, 0.0, -0.02], dtype=np.float64)
+        self.release_counter = 0
+        self.recent_ear_contact = 0
+        self.active_grasp_local_offset = np.asarray([-0.028, -0.003, -0.069], dtype=np.float64)
         self.reset()
+
+    def _cache_contact_ids(self) -> None:
+        self.gripper_contact_geom_ids = {
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "gripper_palm_geom"),
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "gripper_upper_finger_geom"),
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "gripper_lower_finger_geom"),
+        }
+        self.target_ear_geom_ids = {
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_left_ear_front_contact"),
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_left_ear_back_contact"),
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_right_ear_front_contact"),
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_right_ear_back_contact"),
+        }
 
     def reset(self, task_name: str | None = None, context: dict[str, float] | None = None) -> dict[str, np.ndarray]:
         if task_name is not None:
             self.task_name = task_name
         self.context = context if context is not None else sample_context(self.context_cfg, self.rng)
+        self._task_adjust_context()
         self.step_idx = 0
         self.object_attached = False
         self.verified = False
         self.placed = False
         self.lifted = False
         self.last_primitive = OBS_CENTER_ID
+        self.release_counter = 0
+        self.recent_ear_contact = 0
+        self.active_grasp_local_offset = np.asarray([-0.028, -0.003, -0.069], dtype=np.float64)
         self.action_delay_queue.clear()
         mujoco.mj_resetData(self.model, self.data)
         self.data.qpos[:6] = HOME_QPOS.astype(np.float64)
@@ -91,14 +112,43 @@ class RoArmSimEnv:
         mujoco.mj_forward(self.model, self.data)
         return self._observation()
 
+    def _task_adjust_context(self) -> None:
+        if self.task_name == "level2_approach":
+            for key in ("cam_x", "cam_y", "cam_z", "cam_roll", "cam_pitch", "cam_yaw"):
+                self.context[key] *= 0.70
+            self.context["fov_bias"] *= 0.60
+            self.context["light_gain"] = 1.0 + (self.context["light_gain"] - 1.0) * 0.60
+            self.context["blur_sigma"] *= 0.50
+            self.context["noise_std"] *= 0.50
+            self.context["action_gain"] = 1.0 + (self.context["action_gain"] - 1.0) * 0.50
+            self.context["action_delay"] = min(int(self.context["action_delay"]), 1)
+            self.context["joint_bias"] = float(self.context["joint_bias"]) * 0.50
+            return
+        if self.task_name == "level3_pick_place":
+            for key in ("cam_x", "cam_y", "cam_z", "cam_roll", "cam_pitch", "cam_yaw"):
+                self.context[key] *= 0.45
+            self.context["fov_bias"] *= 0.35
+            self.context["light_gain"] = 1.0 + (self.context["light_gain"] - 1.0) * 0.35
+            self.context["blur_sigma"] *= 0.25
+            self.context["noise_std"] *= 0.25
+            self.context["action_gain"] = 1.0 + (self.context["action_gain"] - 1.0) * 0.25
+            self.context["action_delay"] = min(int(self.context["action_delay"]), 1)
+            self.context["joint_bias"] = float(self.context["joint_bias"]) * 0.20
+
     def _sample_task_layout(self) -> None:
-        target_x = self.rng.uniform(0.22, 0.38)
-        target_y = self.rng.uniform(-0.12, 0.12)
-        drop_x = self.rng.uniform(0.18, 0.32)
-        drop_y = self.rng.uniform(-0.20, -0.08)
+        if self.task_name == "level3_pick_place":
+            target_x = self.rng.uniform(0.28, 0.30)
+            target_y = self.rng.uniform(-0.02, 0.02)
+            drop_x = self.rng.uniform(0.23, 0.26)
+            drop_y = self.rng.uniform(-0.13, -0.11)
+        else:
+            target_x = self.rng.uniform(0.22, 0.38)
+            target_y = self.rng.uniform(-0.12, 0.12)
+            drop_x = self.rng.uniform(0.18, 0.32)
+            drop_y = self.rng.uniform(-0.20, -0.08)
         target_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "target")
         drop_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "distractor")
-        self.model.body_pos[target_body] = np.asarray([target_x, target_y, 0.08], dtype=np.float64)
+        self.model.body_pos[target_body] = np.asarray([target_x, target_y, 0.040], dtype=np.float64)
         self.model.body_pos[drop_body] = np.asarray([drop_x, drop_y, 0.045], dtype=np.float64)
 
     def _render_camera(self, camera_name: str, renderer: mujoco.Renderer) -> np.ndarray:
@@ -190,8 +240,36 @@ class RoArmSimEnv:
         return np.concatenate([qpos, qvel, flags], dtype=np.float32)
 
     def _target_position(self) -> np.ndarray:
+        site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "target_site")
+        return self.data.site_xpos[site_id].copy()
+
+    def _grasp_site_local_positions(self) -> dict[str, np.ndarray]:
+        return {
+            "left_base": np.asarray([0.018, 0.001, 0.056], dtype=np.float64),
+            "left_mid": np.asarray([0.028, 0.003, 0.069], dtype=np.float64),
+            "right_base": np.asarray([-0.018, 0.001, 0.056], dtype=np.float64),
+            "right_mid": np.asarray([-0.028, 0.003, 0.069], dtype=np.float64),
+        }
+
+    def _grasp_site_world_positions(self) -> dict[str, np.ndarray]:
+        return {
+            "left_base": self.data.site_xpos[mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "target_left_grasp_base")].copy(),
+            "left_mid": self.data.site_xpos[mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "target_left_grasp_mid")].copy(),
+            "right_base": self.data.site_xpos[mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "target_right_grasp_base")].copy(),
+            "right_mid": self.data.site_xpos[mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "target_right_grasp_mid")].copy(),
+        }
+
+    def _nearest_grasp_site_name(self) -> str:
+        ee = self._ee_position()
+        candidates = self._grasp_site_world_positions()
+        return min(candidates.keys(), key=lambda name: float(np.linalg.norm(candidates[name] - ee)))
+
+    def _target_body_position(self) -> np.ndarray:
         body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "target")
         return self.data.xpos[body_id].copy()
+
+    def _target_grasp_position(self) -> np.ndarray:
+        return self._grasp_site_world_positions()[self._nearest_grasp_site_name()]
 
     def _dropzone_position(self) -> np.ndarray:
         body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "distractor")
@@ -200,6 +278,29 @@ class RoArmSimEnv:
     def _ee_position(self) -> np.ndarray:
         site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "ee_site")
         return self.data.site_xpos[site_id].copy()
+
+    def _gripper_closed_enough(self) -> bool:
+        return bool(self.data.qpos[5] < 0.42)
+
+    def _gripper_firmly_closed(self) -> bool:
+        return bool(self.data.qpos[5] < 0.40)
+
+    def _ear_grasp_contact_count(self) -> int:
+        count = 0
+        for idx in range(int(self.data.ncon)):
+            contact = self.data.contact[idx]
+            pair = {int(contact.geom1), int(contact.geom2)}
+            if pair & self.gripper_contact_geom_ids and pair & self.target_ear_geom_ids:
+                count += 1
+        return count
+
+    def _ear_grasp_ready(self) -> bool:
+        return (
+            self._gripper_firmly_closed()
+            and self.recent_ear_contact >= 2
+            and self.ee_target_distance() < 0.11
+            and self.center_error_px() < 56.0
+        )
 
     def visibility_score(self) -> float:
         visible, _, _, radius = self._project_object(self._target_position())
@@ -215,12 +316,12 @@ class RoArmSimEnv:
         return float(np.sqrt((px - center) ** 2 + (py - center) ** 2))
 
     def target_yaw_error(self) -> float:
-        target = self._target_position()
+        target = self._target_grasp_position()
         yaw_target = np.arctan2(target[1], max(target[0], 1e-6))
         return float(np.clip(yaw_target - self.data.qpos[0], -0.9, 0.9))
 
     def ee_target_distance(self) -> float:
-        return float(np.linalg.norm(self._ee_position() - self._target_position()))
+        return float(np.linalg.norm(self._ee_position() - self._target_grasp_position()))
 
     def dropzone_distance(self) -> float:
         return float(np.linalg.norm(self._ee_position() - self._dropzone_position()))
@@ -230,14 +331,20 @@ class RoArmSimEnv:
         drop_xy = self._dropzone_position()[:2]
         return float(np.linalg.norm(ee_xy - drop_xy))
 
+    def _target_xy_in_dropzone(self, margin: float = 0.015) -> bool:
+        target_xy = self._target_body_position()[:2]
+        drop_xy = self._dropzone_position()[:2]
+        half_extent = np.asarray([0.05 + margin, 0.05 + margin], dtype=np.float64)
+        return bool(np.all(np.abs(target_xy - drop_xy) <= half_extent))
+
     def pregrasp_ready(self) -> bool:
-        return self.visibility_score() > 0.14 and self.center_error_px() < 18.0 and self.ee_target_distance() < 0.18
+        return self.visibility_score() > 0.11 and self.center_error_px() < 20.0 and self.ee_target_distance() < 0.17
 
     def approach_success_ready(self) -> bool:
         return (
-            self.visibility_score() > 0.16
-            and self.center_error_px() < 14.0
-            and self.ee_target_distance() < 0.15
+            self.visibility_score() > 0.13
+            and self.center_error_px() < 19.0
+            and self.ee_target_distance() < 0.160
         )
 
     def task_success(self) -> int:
@@ -263,20 +370,33 @@ class RoArmSimEnv:
         for _ in range(max(1, dwell) * self.cfg["action_repeat"]):
             self.data.ctrl[:6] = applied
             mujoco.mj_step(self.model, self.data)
+            if self._ear_grasp_contact_count() > 0:
+                self.recent_ear_contact = min(self.recent_ear_contact + 1, 6)
+            else:
+                self.recent_ear_contact = max(self.recent_ear_contact - 1, 0)
             if self.object_attached:
+                if not self._gripper_closed_enough():
+                    self.release_counter += 1
+                else:
+                    self.release_counter = 0
+                if self.release_counter >= 3:
+                    self.object_attached = False
+                    self.lifted = False
+                    self.release_counter = 0
+                    continue
                 self._update_attached_object_pose()
         mujoco.mj_forward(self.model, self.data)
 
     def _update_attached_object_pose(self) -> None:
         target_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "target")
-        self.model.body_pos[target_body] = self._ee_position() + self.object_grasp_offset
+        self.model.body_pos[target_body] = self._ee_position() + self.active_grasp_local_offset
         mujoco.mj_forward(self.model, self.data)
 
     def _prealign_pose(self, target_position: np.ndarray) -> np.ndarray:
         pose = self._pregrasp_anchor_pose(target_position)
-        pose[1] = min(pose[1], 0.05)
-        pose[2] = min(pose[2], 2.34)
-        pose[3] = min(pose[3], -0.26)
+        pose[1] = min(pose[1], 0.34)
+        pose[2] = min(pose[2], 2.02)
+        pose[3] = min(pose[3], -0.12)
         pose[5] = 0.98
         return pose
 
@@ -287,13 +407,14 @@ class RoArmSimEnv:
 
     def _pregrasp_anchor_pose(self, target_position: np.ndarray) -> np.ndarray:
         pose = PREALIGN_BASE_QPOS.copy()
-        pose[0] = float(np.clip(np.arctan2(target_position[1], max(target_position[0], 1e-6)), -1.10, 1.10))
-        # Coarse-searched anchor that reaches the tabletop target band more
-        # consistently before the local servo loop starts.
-        pose[1] = 0.15
-        pose[2] = 2.40
-        pose[3] = -0.20
-        pose[5] = 0.86
+        grasp_position = self._target_grasp_position()
+        pose[0] = float(np.clip(np.arctan2(grasp_position[1], max(grasp_position[0], 1e-6)), -1.10, 1.10))
+        # Search-based anchor that places the gripper close to the ear handle
+        # before the local servo loop takes over.
+        pose[1] = 0.38
+        pose[2] = 1.95
+        pose[3] = -0.10
+        pose[5] = 0.90
         return pose
 
     def _dropzone_pose(self) -> np.ndarray:
@@ -370,7 +491,7 @@ class RoArmSimEnv:
         dwell: int,
     ) -> None:
         self._servo_step_to_point(
-            self._target_position(),
+            self._target_grasp_position(),
             forward_gain=forward_gain,
             vertical_gain=vertical_gain,
             yaw_gain=yaw_gain,
@@ -421,46 +542,85 @@ class RoArmSimEnv:
         self._apply_target_pose(q_target, dwell=2)
 
     def _execute_pregrasp_servo(self) -> None:
-        self._apply_target_pose(self._pregrasp_anchor_pose(self._target_position()), dwell=2)
-        for _ in range(16):
+        self._apply_target_pose(self._pregrasp_anchor_pose(self._target_grasp_position()), dwell=3)
+        saw_contact = False
+        for _ in range(36):
             self._servo_step_to_target(
-                forward_gain=1.05,
-                vertical_gain=0.85,
-                yaw_gain=0.95,
-                forward_clip=(-0.10, 0.04),
-                shoulder_clip=(-0.05, 0.05),
-                wrist_clip=(-0.05, 0.05),
-                gripper_open=0.86,
+                forward_gain=1.28,
+                vertical_gain=1.02,
+                yaw_gain=1.08,
+                forward_clip=(-0.14, 0.04),
+                shoulder_clip=(-0.07, 0.07),
+                wrist_clip=(-0.06, 0.06),
+                gripper_open=0.90,
                 dwell=1,
             )
-            if self.pregrasp_ready():
+            if self._ear_grasp_contact_count() > 0:
+                saw_contact = True
+            if self.pregrasp_ready() or saw_contact:
                 break
+        if saw_contact:
+            for _ in range(2):
+                self._servo_step_to_target(
+                    forward_gain=0.52,
+                    vertical_gain=0.48,
+                    yaw_gain=0.54,
+                    forward_clip=(-0.03, 0.01),
+                    shoulder_clip=(-0.02, 0.02),
+                    wrist_clip=(-0.02, 0.02),
+                    gripper_open=0.68,
+                    dwell=1,
+                )
 
     def _execute_grasp(self) -> None:
-        for _ in range(3):
-            self._servo_step_to_target(
-                forward_gain=0.48,
-                vertical_gain=0.50,
-                yaw_gain=0.55,
-                forward_clip=(-0.03, 0.015),
-                shoulder_clip=(-0.025, 0.025),
-                wrist_clip=(-0.025, 0.025),
-                gripper_open=0.82,
-                dwell=1,
-            )
-        for _ in range(2):
-            q_target = self.data.qpos[:6].copy()
-            q_target[1] -= 0.035
-            q_target[2] -= 0.045
-            q_target[3] += 0.018
-            self._apply_target_pose(q_target, dwell=1)
+        had_contact = self._ear_grasp_contact_count() > 0
+        if not had_contact:
+            self._apply_target_pose(self._pregrasp_anchor_pose(self._target_grasp_position()), dwell=1)
+            for _ in range(8):
+                self._servo_step_to_target(
+                    forward_gain=1.05,
+                    vertical_gain=0.92,
+                    yaw_gain=0.92,
+                    forward_clip=(-0.08, 0.03),
+                    shoulder_clip=(-0.05, 0.05),
+                    wrist_clip=(-0.04, 0.04),
+                    gripper_open=0.62,
+                    dwell=1,
+                )
+                had_contact = had_contact or self._ear_grasp_contact_count() > 0
+            for _ in range(4):
+                q_target = self.data.qpos[:6].copy()
+                q_target[1] -= 0.015
+                q_target[2] -= 0.020
+                q_target[3] += 0.008
+                self._apply_target_pose(q_target, dwell=1)
+                had_contact = had_contact or self._ear_grasp_contact_count() > 0
         q_target = self.data.qpos[:6].copy()
-        q_target[5] = 0.18
-        self._apply_target_pose(q_target, dwell=2)
-        if self.ee_target_distance() < 0.24 and self.center_error_px() < 55.0:
+        q_target[5] = 0.05
+        self._apply_target_pose(q_target, dwell=4)
+        contact_frames = 0
+        stable_frames = 0
+        for _ in range(5):
+            self._apply_target_pose(self.data.qpos[:6].copy(), dwell=1)
+            if self._ear_grasp_contact_count() > 0:
+                contact_frames += 1
+            if self._ear_grasp_ready():
+                stable_frames += 1
+        if stable_frames >= 2 or (
+            had_contact
+            and self._gripper_firmly_closed()
+            and self.ee_target_distance() < 0.11
+        ) or (
+            self._gripper_firmly_closed()
+            and self.ee_target_distance() < 0.055
+            and self.center_error_px() < 18.0
+        ):
+            self.active_grasp_local_offset = -self._grasp_site_local_positions()[self._nearest_grasp_site_name()]
             self.object_attached = True
             self.lifted = False
+            self.release_counter = 0
             self._update_attached_object_pose()
+            self._apply_target_pose(self.data.qpos[:6].copy(), dwell=2)
 
     def _execute_lift(self) -> None:
         q_target = self._carry_pose(self._dropzone_position())
@@ -473,19 +633,19 @@ class RoArmSimEnv:
         destination = self._dropzone_position()
         hover = destination + np.asarray([0.0, 0.0, 0.11], dtype=np.float64)
         self._apply_target_pose(self._carry_pose(destination), dwell=1)
-        for _ in range(6):
+        for _ in range(8):
             self._servo_step_to_point(
                 hover,
-                forward_gain=0.92,
-                vertical_gain=0.82,
-                yaw_gain=0.90,
+                forward_gain=0.95,
+                vertical_gain=0.86,
+                yaw_gain=0.94,
                 forward_clip=(-0.08, 0.05),
                 shoulder_clip=(-0.05, 0.05),
                 wrist_clip=(-0.04, 0.04),
                 gripper_open=0.18,
                 dwell=1,
             )
-            if self._dropzone_xy_distance() < 0.10:
+            if self._dropzone_xy_distance() < 0.08:
                 break
         self._apply_target_pose(self._dropzone_pose(), dwell=1)
 
@@ -494,41 +654,40 @@ class RoArmSimEnv:
         hover = destination + np.asarray([0.0, 0.0, 0.11], dtype=np.float64)
         place_point = destination + np.asarray([0.0, 0.0, 0.055], dtype=np.float64)
         self._apply_target_pose(self._dropzone_pose(), dwell=1)
-        for _ in range(3):
+        for _ in range(4):
             self._servo_step_to_point(
                 hover,
-                forward_gain=0.70,
-                vertical_gain=0.70,
-                yaw_gain=0.80,
+                forward_gain=0.74,
+                vertical_gain=0.74,
+                yaw_gain=0.84,
                 forward_clip=(-0.05, 0.03),
                 shoulder_clip=(-0.04, 0.04),
                 wrist_clip=(-0.03, 0.03),
                 gripper_open=0.18,
                 dwell=1,
             )
-        for _ in range(4):
+        for _ in range(5):
             self._servo_step_to_point(
                 place_point,
-                forward_gain=0.60,
-                vertical_gain=0.78,
-                yaw_gain=0.75,
+                forward_gain=0.66,
+                vertical_gain=0.82,
+                yaw_gain=0.78,
                 forward_clip=(-0.04, 0.02),
                 shoulder_clip=(-0.03, 0.03),
                 wrist_clip=(-0.03, 0.03),
                 gripper_open=0.18,
                 dwell=1,
             )
-            if self._dropzone_xy_distance() < 0.09:
+            if self._dropzone_xy_distance() < 0.075:
                 break
-        place_distance = self.dropzone_distance()
-        place_xy_distance = self._dropzone_xy_distance()
-        if self.object_attached and place_distance < 0.28 and place_xy_distance < 0.16:
+        if self.object_attached:
+            release_xy = self._ee_position()[:2]
             self.object_attached = False
             self.lifted = True
-            self.placed = True
             target_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "target")
-            self.model.body_pos[target_body] = self._dropzone_position() + np.asarray([0.0, 0.0, 0.035], dtype=np.float64)
+            self.model.body_pos[target_body] = np.asarray([release_xy[0], release_xy[1], 0.040], dtype=np.float64)
             mujoco.mj_forward(self.model, self.data)
+            self.placed = bool(self._target_xy_in_dropzone())
         q_target = self.data.qpos[:6].copy()
         q_target[5] = 1.10
         self._apply_target_pose(q_target, dwell=2)
@@ -538,6 +697,9 @@ class RoArmSimEnv:
 
     def _execute_abort(self) -> None:
         self._apply_target_pose(HOME_QPOS, dwell=2)
+
+    def _execute_hold(self) -> None:
+        self._apply_target_pose(self.data.qpos[:6].copy(), dwell=2)
 
     def _execute_primitive(self, primitive_id_value: int) -> None:
         if primitive_id_value in (OBS_LEFT_ID, OBS_RIGHT_ID, OBS_CENTER_ID):
@@ -576,6 +738,9 @@ class RoArmSimEnv:
         if primitive_id_value == PLACE_OBJECT_ID:
             self._execute_place()
             return
+        if primitive_id_value == HOLD_POSITION_ID:
+            self._execute_hold()
+            return
         if primitive_id_value == ABORT_ID:
             self._execute_abort()
             return
@@ -604,6 +769,7 @@ class RoArmSimEnv:
             "grasped": int(self.object_attached),
             "lifted": int(self.lifted),
             "placed": int(self.placed),
+            "ear_contact_count": self._ear_grasp_contact_count(),
             "ee_target_distance": self.ee_target_distance(),
             "dropzone_distance": self.dropzone_distance(),
             "context": context_vector(self.context),

@@ -22,6 +22,7 @@ from ttla.sim.skills import (
     APPROACH_COARSE_ID,
     APPROACH_FINE_ID,
     GRASP_EXECUTE_ID,
+    HOLD_POSITION_ID,
     LIFT_OBJECT_ID,
     OBS_CENTER_ID,
     OBS_LEFT_ID,
@@ -56,6 +57,7 @@ MANUAL_KEYMAP = {
     glfw.KEY_L: LIFT_OBJECT_ID,
     glfw.KEY_M: TRANSPORT_TO_DROPZONE_ID,
     glfw.KEY_Y: PLACE_OBJECT_ID,
+    glfw.KEY_H: HOLD_POSITION_ID,
     glfw.KEY_X: ABORT_ID,
 }
 

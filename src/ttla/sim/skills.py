@@ -20,7 +20,27 @@ PRIMITIVE_NAMES = [
     "lift_object",
     "transport_to_dropzone",
     "place_object",
+    "hold_position",
     "abort",
+]
+
+PRIMITIVE_DESCRIPTIONS = [
+    "rotate to the left observation pose and look for the target",
+    "rotate to the right observation pose and look for the target",
+    "move to the centered observation pose and inspect the target",
+    "hold view and confirm the target is visible and centered",
+    "move into a coarse pre-grasp alignment in front of the target",
+    "take a larger approach step toward the target",
+    "take a smaller precise approach step toward the target",
+    "back away from the target to recover from a bad approach",
+    "return to a stable re-observation pose before trying again",
+    "servo the gripper into the pre-grasp window using visual feedback",
+    "execute the grasp by descending, closing the gripper, and checking attachment",
+    "lift the grasped object upward while keeping the gripper closed",
+    "carry the grasped object toward the blue drop zone",
+    "lower over the blue drop zone, open the gripper, and release the object",
+    "keep the current pose still when the task is already complete",
+    "abort the task and return to a safe home pose",
 ]
 
 OBS_LEFT_ID = 0
@@ -37,7 +57,8 @@ GRASP_EXECUTE_ID = 10
 LIFT_OBJECT_ID = 11
 TRANSPORT_TO_DROPZONE_ID = 12
 PLACE_OBJECT_ID = 13
-ABORT_ID = 14
+HOLD_POSITION_ID = 14
+ABORT_ID = 15
 
 HOME_QPOS = np.asarray([0.0, 0.0, 2.618, -1.0472, 0.0, 0.85], dtype=np.float32)
 OBS_CENTER_QPOS = np.asarray([0.0, -0.10, 2.55, -1.18, 0.0, 0.95], dtype=np.float32)
@@ -53,6 +74,7 @@ LEVEL1_PRIMITIVES = (
     OBS_RIGHT_ID,
     OBS_CENTER_ID,
     VERIFY_TARGET_ID,
+    HOLD_POSITION_ID,
     ABORT_ID,
 )
 
@@ -65,6 +87,7 @@ LEVEL2_PRIMITIVES = (
     APPROACH_COARSE_ID,
     APPROACH_FINE_ID,
     RETREAT_ID,
+    HOLD_POSITION_ID,
     ABORT_ID,
 )
 
@@ -76,8 +99,11 @@ LEVEL3_PRIMITIVES = (
     TRANSPORT_TO_DROPZONE_ID,
     PLACE_OBJECT_ID,
     RETREAT_ID,
+    HOLD_POSITION_ID,
     ABORT_ID,
 )
+
+ALL_PRIMITIVES = tuple(range(len(PRIMITIVE_NAMES)))
 
 
 @dataclass(frozen=True)
@@ -94,6 +120,10 @@ class HybridAction:
 
 def primitive_name(primitive_id: int) -> str:
     return PRIMITIVE_NAMES[int(primitive_id)]
+
+
+def primitive_description(primitive_id: int) -> str:
+    return PRIMITIVE_DESCRIPTIONS[int(primitive_id)]
 
 
 def primitive_count() -> int:
@@ -120,12 +150,8 @@ def primitive_action(action: int | dict[str, int] | str) -> int:
 
 
 def allowed_primitives(task_level: int) -> tuple[int, ...]:
-    if task_level == 1:
-        return LEVEL1_PRIMITIVES
-    if task_level == 2:
-        return LEVEL2_PRIMITIVES
-    if task_level == 3:
-        return LEVEL3_PRIMITIVES
+    if task_level in (1, 2, 3):
+        return ALL_PRIMITIVES
     raise KeyError(task_level)
 
 

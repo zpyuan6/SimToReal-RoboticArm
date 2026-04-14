@@ -13,6 +13,7 @@ from ..sim.skills import (
     DROPZONE_QPOS,
     GRASP_EXECUTE_ID,
     HOME_QPOS,
+    HOLD_POSITION_ID,
     LIFT_OBJECT_ID,
     OBS_CENTER_ID,
     OBS_LEFT_ID,
@@ -91,6 +92,10 @@ class PrimitiveExecutor:
         if primitive_id_value == PLACE_OBJECT_ID:
             self._delta(np.asarray([0.0, 0.08, -0.05, 0.0, 0.0, 0.0], dtype=np.float32))
             self._set_gripper(1.05)
+            return PrimitiveResult(True, False, False, {"primitive_name": name})
+        if primitive_id_value == HOLD_POSITION_ID:
+            self.robot.move_joint_vector(self.current_q)
+            time.sleep(self.sleep_s * 0.5)
             return PrimitiveResult(True, False, False, {"primitive_name": name})
         if primitive_id_value == ABORT_ID:
             self._goto(HOME_QPOS)

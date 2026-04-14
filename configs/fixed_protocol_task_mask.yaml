@@ -1,10 +1,10 @@
-seed: 11
+seed: 7
 
 paths:
-  data_root: data/processed_direct
-  results_root: results/direct_sim
+  data_root: data/processed
+  results_root: results/fixed_protocol_task_mask
   figures_root: figures
-  checkpoint_dir: results/direct_sim/checkpoints
+  checkpoint_dir: results/fixed_protocol_task_mask/checkpoints
 
 sim:
   image_size: 84
@@ -16,16 +16,16 @@ sim:
     - level2_approach
     - level3_pick_place
   context:
-    camera_jitter: 0.0
-    fov_jitter: 0.0
-    light_jitter: 0.0
-    texture_jitter: 0.0
-    blur_sigma: 0.0
-    noise_std: 0.0
-    action_gain_low: 1.0
-    action_gain_high: 1.0
-    action_delay_max: 0
-    joint_bias: 0.0
+    camera_jitter: 0.015
+    fov_jitter: 6.0
+    light_jitter: 0.35
+    texture_jitter: 0.35
+    blur_sigma: 1.0
+    noise_std: 0.03
+    action_gain_low: 0.78
+    action_gain_high: 1.18
+    action_delay_max: 2
+    joint_bias: 0.09
 
 data:
   train_episodes: 1200
@@ -46,23 +46,21 @@ model:
   task_embed_dim: 16
   task_prior_scale: 1.2
   stage_prior_scale: 0.8
-  predicted_stage_prior_scale: 0.6
-  use_prev_action_context: true
+  task_hard_mask: true
   history_len: 4
   chunk_size: 2
   task_vocab_size: 3
   transition_stage_bins: 4
-  stage_aux_classes: 8
   language_dim: 32
   diffusion_steps: 4
   diffusion_dim: 32
   prev_action_dropout: 0.35
-  chunk_future_weight: 0.1
-  chunk_temporal_agg: false
+  chunk_future_weight: 0.25
+  chunk_temporal_agg: true
   chunk_temporal_decay: 0.35
   recurrent_use_prev_action: true
-  recurrent_runtime_horizon: 6
-  recurrent_sequence_final_weight: 2.0
+  recurrent_runtime_horizon: 8
+  recurrent_sequence_final_weight: 1.0
   adapter_hidden_dim: 64
   adapter_scale: 0.1
   residual_scale: 0.0
@@ -77,12 +75,9 @@ train:
   transition_loss_weight: 0.5
   use_weighted_sampler: true
   primitive_balance_power: 0.75
-  stage_balance_power: 0.65
   success_sample_boost: 2.0
   level3_success_boost: 6.0
   level3_late_primitive_boost: 2.0
-  level3_transport_stage_boost: 1.5
-  stage_loss_weight: 0.25
   normalize_task_mass_after_boost: true
 
 adaptation:
@@ -94,3 +89,36 @@ adaptation:
 evaluation:
   episodes_per_task: 96
   report_name: summary.csv
+
+backbone_overrides:
+  recurrent:
+    model:
+      history_len: 6
+      prev_action_dropout: 0.35
+      recurrent_use_prev_action: true
+      recurrent_runtime_horizon: 6
+      recurrent_sequence_final_weight: 2.0
+    train:
+      batch_size: 12
+      epochs: 20
+      lr: 0.0003
+      min_lr: 0.00002
+  chunking:
+    model:
+      history_len: 6
+      chunk_size: 2
+      chunk_future_weight: 0.1
+      chunk_temporal_agg: false
+      chunk_temporal_decay: 0.35
+    train:
+      batch_size: 12
+      epochs: 12
+      lr: 0.0005
+      min_lr: 0.00002
+  language:
+    model:
+      language_dim: 48
+    train:
+      epochs: 12
+      lr: 0.0007
+      min_lr: 0.00003

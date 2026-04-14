@@ -28,13 +28,31 @@ def build_model(cfg: dict) -> BaseTTLAModel:
         task_vocab_size=model_cfg.get("task_vocab_size", 3),
         task_embed_dim=model_cfg.get("task_embed_dim", 16),
         transition_stage_bins=model_cfg.get("transition_stage_bins", 4),
+        stage_aux_classes=model_cfg.get("stage_aux_classes", 8),
         adapter_hidden_dim=model_cfg.get("adapter_hidden_dim", 64),
         adapter_scale=model_cfg.get("adapter_scale", 0.1),
+        task_prior_scale=model_cfg.get("task_prior_scale", 1.0),
+        task_prior_negative_value=model_cfg.get("task_prior_negative_value", 0.0),
+        stage_prior_scale=model_cfg.get("stage_prior_scale", 0.0),
+        predicted_stage_prior_scale=model_cfg.get("predicted_stage_prior_scale", 0.0),
+        task_hard_mask=model_cfg.get("task_hard_mask", False),
+        use_prev_action_context=model_cfg.get("use_prev_action_context", False),
         history_len=model_cfg.get("history_len", 4),
         chunk_size=model_cfg.get("chunk_size", 3),
+        chunk_future_weight=model_cfg.get("chunk_future_weight", 0.25),
+        chunk_temporal_agg=model_cfg.get("chunk_temporal_agg", True),
+        chunk_temporal_decay=model_cfg.get("chunk_temporal_decay", 0.35),
+        prev_action_dropout=model_cfg.get("prev_action_dropout", 0.35),
+        use_prev_action=model_cfg.get("recurrent_use_prev_action", False),
+        runtime_horizon=model_cfg.get("recurrent_runtime_horizon"),
+        sequence_final_weight=model_cfg.get("recurrent_sequence_final_weight", 1.0),
         language_dim=model_cfg.get("language_dim", 32),
+        language_action_prior_scale=model_cfg.get("language_action_prior_scale", 0.8),
+        language_state_text_scale=model_cfg.get("language_state_text_scale", 0.0),
         diffusion_steps=model_cfg.get("diffusion_steps", 4),
         diffusion_dim=model_cfg.get("diffusion_dim", 32),
+        diffusion_loss_weight=model_cfg.get("diffusion_loss_weight", 0.5),
+        diffusion_logit_blend=model_cfg.get("diffusion_logit_blend", 0.5),
     )
 
 
@@ -64,6 +82,7 @@ def _build_sampler(cfg: dict, dataset: TrajectoryDataset) -> WeightedRandomSampl
     for task, weight in task_weight_map.items():
         weights[task_ids == task] *= weight
     primitive_ids = np.asarray(dataset.primitive_ids)
+    stage_ids = np.asarray(getattr(dataset, "stage_ids", np.zeros_like(primitive_ids)))
     primitive_balance_power = float(cfg["train"].get("primitive_balance_power", 0.0))
     if primitive_balance_power > 0.0:
         for task in unique_tasks:
@@ -79,6 +98,21 @@ def _build_sampler(cfg: dict, dataset: TrajectoryDataset) -> WeightedRandomSampl
             for primitive, primitive_weight in primitive_weight_map.items():
                 mask = task_mask & (primitive_ids == primitive)
                 weights[mask] *= primitive_weight
+    stage_balance_power = float(cfg["train"].get("stage_balance_power", 0.0))
+    if stage_balance_power > 0.0:
+        for task in unique_tasks:
+            task_mask = task_ids == task
+            task_stages = stage_ids[task_mask]
+            stage_vals, stage_counts = np.unique(task_stages, return_counts=True)
+            if len(stage_vals) == 0:
+                continue
+            stage_weight_map = {
+                int(stage): (float(task_mask.sum()) / float(len(stage_vals) * count)) ** stage_balance_power
+                for stage, count in zip(stage_vals, stage_counts)
+            }
+            for stage, stage_weight in stage_weight_map.items():
+                mask = task_mask & (stage_ids == stage)
+                weights[mask] *= stage_weight
     success_boost = float(cfg["train"].get("success_sample_boost", 2.0))
     l3_success_boost = float(cfg["train"].get("level3_success_boost", 6.0))
     weights[success > 0.5] *= success_boost
@@ -87,6 +121,10 @@ def _build_sampler(cfg: dict, dataset: TrajectoryDataset) -> WeightedRandomSampl
     if late_l3_boost > 1.0:
         late_mask = (task_ids == 2) & np.isin(primitive_ids, np.asarray([GRASP_EXECUTE_ID, LIFT_OBJECT_ID, PLACE_OBJECT_ID]))
         weights[late_mask] *= late_l3_boost
+    l3_stage_boost = float(cfg["train"].get("level3_transport_stage_boost", 1.0))
+    if l3_stage_boost > 1.0:
+        transport_mask = (task_ids == 2) & np.isin(stage_ids, np.asarray([5, 6, 7]))
+        weights[transport_mask] *= l3_stage_boost
     if bool(cfg["train"].get("normalize_task_mass_after_boost", True)):
         target_mass = 1.0 / max(len(unique_tasks), 1)
         total_weight = float(weights.sum())
@@ -144,6 +182,7 @@ def train_model(cfg: dict, train_path: str | Path, val_path: str | Path) -> Path
     checkpoint_dir = ensure_dir(cfg["paths"]["checkpoint_dir"])
     best_path = checkpoint_dir / "best_model.pt"
     transition_weight = float(cfg["train"].get("transition_loss_weight", 0.5))
+    stage_loss_weight = float(cfg["train"].get("stage_loss_weight", 0.0))
     for _ in range(cfg["train"]["epochs"]):
         model.train()
         for batch in tqdm(train_loader, desc="train", leave=False):
@@ -153,11 +192,12 @@ def train_model(cfg: dict, train_path: str | Path, val_path: str | Path) -> Path
             pred_next = model.predict_next(z, batch["primitive_id"], batch.get("state"), task_ids=batch.get("task"))
             loss_policy = model.compute_policy_loss(batch, z)
             loss_trans = F.mse_loss(pred_next, next_z.detach())
-            loss = loss_policy + transition_weight * loss_trans
+            loss_stage = model.compute_stage_loss(batch, z)
+            loss = loss_policy + transition_weight * loss_trans + stage_loss_weight * loss_stage
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
-        val_loss = _evaluate_loss(model, val_loader, transition_weight, device)
+        val_loss = _evaluate_loss(model, val_loader, transition_weight, stage_loss_weight, device)
         if val_loss < best_val:
             best_val = val_loss
             torch.save({"model_state": model.state_dict(), "config": cfg}, best_path)
@@ -199,7 +239,7 @@ def calibrate_adapter(cfg: dict, checkpoint_path: str | Path, real_path: str | P
 
 
 @torch.no_grad()
-def _evaluate_loss(model: BaseTTLAModel, loader: DataLoader, transition_weight: float, device: torch.device) -> float:
+def _evaluate_loss(model: BaseTTLAModel, loader: DataLoader, transition_weight: float, stage_loss_weight: float, device: torch.device) -> float:
     model.eval()
     total = 0.0
     count = 0
@@ -207,7 +247,11 @@ def _evaluate_loss(model: BaseTTLAModel, loader: DataLoader, transition_weight: 
         batch = _to_device(batch, device)
         z, next_z = model.compute_latents(batch)
         pred_next = model.predict_next(z, batch["primitive_id"], batch.get("state"), task_ids=batch.get("task"))
-        loss = model.compute_policy_loss(batch, z) + transition_weight * F.mse_loss(pred_next, next_z)
+        loss = (
+            model.compute_policy_loss(batch, z)
+            + transition_weight * F.mse_loss(pred_next, next_z)
+            + stage_loss_weight * model.compute_stage_loss(batch, z)
+        )
         total += float(loss.item()) * batch["primitive_id"].size(0)
         count += batch["primitive_id"].size(0)
     model.train()

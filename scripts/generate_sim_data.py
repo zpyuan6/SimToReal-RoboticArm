@@ -6,12 +6,13 @@ from pathlib import Path
 import numpy as np
 
 from ttla.config import load_config
+from ttla.sim.task_defs import supervision_stage_id
 from ttla.sim import RoArmSimEnv, ScriptedExpert
 from ttla.utils.io import ensure_dir, save_npz
 
 
 def _prepare_level3_episode(env: RoArmSimEnv, episode: int, retries: int = 6) -> None:
-    modes = ("default", "pregrasp", "grasped", "lifted", "near_dropzone")
+    modes = ("default", "pregrasp", "grasped", "lifted", "near_dropzone", "near_dropzone", "lifted")
     target_mode = modes[episode % len(modes)]
     for _ in range(retries):
         env.reset(task_name="level3_pick_place")
@@ -49,6 +50,7 @@ def collect_split(env: RoArmSimEnv, expert: ScriptedExpert, episodes: int) -> di
     tasks = []
     success = []
     contexts = []
+    stage_ids = []
     episode_ids = []
     step_ids = []
     task_names = env.cfg["tasks"]
@@ -69,6 +71,7 @@ def collect_split(env: RoArmSimEnv, expert: ScriptedExpert, episodes: int) -> di
             tasks.append(transition.task_id)
             success.append(transition.success)
             contexts.append(transition.context)
+            stage_ids.append(supervision_stage_id(int(transition.task_id), int(transition.primitive_id)))
             episode_ids.append(episode)
             step_ids.append(step_idx)
             step_idx += 1
@@ -81,6 +84,7 @@ def collect_split(env: RoArmSimEnv, expert: ScriptedExpert, episodes: int) -> di
         "tasks": np.asarray(tasks, dtype=np.int64),
         "success": np.asarray(success, dtype=np.int64),
         "contexts": np.asarray(contexts, dtype=np.float32),
+        "stage_ids": np.asarray(stage_ids, dtype=np.int64),
         "episode_ids": np.asarray(episode_ids, dtype=np.int64),
         "step_ids": np.asarray(step_ids, dtype=np.int64),
     }

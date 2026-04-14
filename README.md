@@ -53,6 +53,39 @@ If you want to verify that MuJoCo and the simulator import correctly before trai
 uv run python scripts/play_env.py --config configs/base.yaml --mode expert --task level1_verify --disable-gui --save-dir results/replays/smoke
 ```
 
+## Fixed Protocol
+
+The simulator and backbone comparisons are currently stabilized around:
+
+- [fixed_protocol.yaml](/F:/RoboticArm/configs/fixed_protocol.yaml)
+
+This protocol fixes:
+
+- `episode_horizon = 32`
+- `train/val/test = 1200 / 240 / 360`
+- the current task set `level1_verify / level2_approach / level3_pick_place`
+- the weighted sim training schedule used for the backbone suite
+
+Recommended commands:
+
+- train the default feedforward backbone:
+
+```bash
+uv run python scripts/train_main.py --config configs/fixed_protocol.yaml
+```
+
+- run the fixed-protocol multi-backbone suite:
+
+```bash
+uv run python scripts/run_backbone_suite.py --config configs/fixed_protocol.yaml --baselines no_adaptation
+```
+
+Saved backbone checkpoints and summaries:
+
+- [suite_checkpoints.csv](/F:/RoboticArm/results/fixed_protocol/backbone_suite/suite_checkpoints.csv)
+- [suite_summary_metrics.csv](/F:/RoboticArm/results/fixed_protocol/backbone_suite/suite_summary_metrics.csv)
+- [suite_overall_metrics.csv](/F:/RoboticArm/results/fixed_protocol/backbone_suite/suite_overall_metrics.csv)
+
 ## Simulator Visualization
 
 If you only want one command to inspect the simulator, use:

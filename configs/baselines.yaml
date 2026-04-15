@@ -2,7 +2,10 @@ baselines:
   - no_adaptation
   - domain_randomization_only
   - input_normalization
+  - probe_feature_alignment
+  - static_adapter
   - few_shot_finetuning
+  - tent_style
   - ours
 
 ablations:

@@ -11,6 +11,7 @@ import torch
 
 from ttla.config import load_config
 from ttla.evaluation.baselines import baseline_overrides
+from ttla.models import load_model_state
 from ttla.training import build_model
 from ttla.sim import RoArmSimEnv, ScriptedExpert
 from ttla.sim.skills import (
@@ -88,7 +89,7 @@ def _parse_args() -> argparse.Namespace:
 def _load_model(cfg: dict, checkpoint_path: str | Path, device: torch.device):
     payload = torch.load(checkpoint_path, map_location=device)
     model = build_model(cfg).to(device)
-    model.load_state_dict(payload["model_state"])
+    load_model_state(model, payload["model_state"])
     model.eval()
     return model
 

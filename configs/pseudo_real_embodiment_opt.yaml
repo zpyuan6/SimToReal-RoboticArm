@@ -1,0 +1,161 @@
+seed: 7
+
+paths:
+  data_root: data/pseudo_real_embodiment
+  results_root: results/pseudo_real_embodiment_opt
+  figures_root: figures
+  checkpoint_dir: results/pseudo_real_embodiment_opt/checkpoints
+
+sim:
+  image_size: 84
+  control_dt: 0.02
+  action_repeat: 5
+  episode_horizon: 32
+  tasks:
+    - level1_verify
+    - level2_approach
+    - level3_pick_place
+  context:
+    camera_jitter: 0.040
+    fov_jitter: 13.0
+    light_jitter: 0.15
+    texture_jitter: 0.15
+    blur_sigma: 0.35
+    noise_std: 0.01
+    action_gain_low: 0.58
+    action_gain_high: 1.38
+    action_delay_max: 4
+    joint_bias: 0.17
+
+data:
+  train_episodes: 1200
+  val_episodes: 240
+  test_episodes: 360
+  real_probe_episodes: 18
+
+pseudo_real:
+  calibration_episodes: 160
+  heldout_episodes: 240
+  source_train_path: data/processed/train.npz
+
+model:
+  backbone_type: feedforward
+  image_channels: 3
+  state_dim: 18
+  action_dim: 16
+  action_residual_dim: 6
+  latent_dim: 128
+  hidden_dim: 128
+  context_dim: 1
+  action_embed_dim: 16
+  task_embed_dim: 16
+  task_prior_scale: 1.2
+  task_prior_negative_value: 0.0
+  stage_prior_scale: 0.8
+  predicted_stage_prior_scale: 0.0
+  use_prev_action_context: false
+  history_len: 4
+  chunk_size: 2
+  task_vocab_size: 3
+  transition_stage_bins: 4
+  stage_aux_classes: 8
+  language_dim: 32
+  language_action_prior_scale: 0.8
+  diffusion_steps: 4
+  diffusion_dim: 32
+  prev_action_dropout: 0.35
+  chunk_future_weight: 0.25
+  chunk_temporal_agg: true
+  chunk_temporal_decay: 0.35
+  recurrent_use_prev_action: true
+  recurrent_runtime_horizon: 8
+  recurrent_sequence_final_weight: 1.0
+  diffusion_logit_blend: 0.5
+  adapter_hidden_dim: 64
+  adapter_scale: 0.1
+  residual_scale: 0.0
+
+train:
+  batch_size: 16
+  epochs: 8
+  lr: 0.001
+  min_lr: 0.00005
+  weight_decay: 0.0001
+  device: cpu
+  transition_loss_weight: 0.5
+  use_weighted_sampler: true
+  primitive_balance_power: 0.75
+  stage_balance_power: 0.65
+  success_sample_boost: 2.0
+  level3_success_boost: 6.0
+  level3_late_primitive_boost: 2.0
+  level3_transport_stage_boost: 1.5
+  stage_loss_weight: 0.25
+  normalize_task_mass_after_boost: true
+
+adaptation:
+  lr: 0.0005
+  epochs: 12
+  batch_size: 8
+  adapter_reg_weight: 0.1
+  static_alignment_weight: 1.0
+
+few_shot:
+  lr: 0.00015
+  epochs: 8
+  batch_size: 8
+  weight_decay: 0.00005
+  transition_loss_weight: 0.35
+  stage_loss_weight: 0.2
+  trainable_modules:
+    - image_encoder
+    - state_encoder
+    - fusion
+    - policy_head
+    - feature_fusion
+    - gru
+    - post_gru
+    - chunk_head
+    - direct_head
+    - denoiser
+    - stage_head
+
+evaluation:
+  episodes_per_task: 96
+  report_name: summary.csv
+
+backbone_overrides:
+  recurrent:
+    model:
+      adapter_scale: 0.06
+      history_len: 4
+      task_embed_dim: 24
+      task_prior_scale: 1.35
+      task_prior_negative_value: -0.20
+      prev_action_dropout: 0.08
+      recurrent_use_prev_action: true
+      recurrent_runtime_horizon: 4
+      recurrent_sequence_final_weight: 1.6
+      stage_prior_scale: 1.25
+      predicted_stage_prior_scale: 0.40
+    adaptation:
+      lr: 0.00008
+      epochs: 30
+      adapter_reg_weight: 0.03
+      batch_size: 4
+  diffusion:
+    model:
+      adapter_scale: 0.04
+      task_embed_dim: 24
+      use_prev_action_context: true
+      task_prior_scale: 1.50
+      task_prior_negative_value: -0.20
+      stage_prior_scale: 1.00
+      predicted_stage_prior_scale: 0.30
+      diffusion_loss_weight: 0.001
+      diffusion_logit_blend: 0.0
+    adaptation:
+      lr: 0.00006
+      epochs: 32
+      adapter_reg_weight: 0.18
+      batch_size: 4

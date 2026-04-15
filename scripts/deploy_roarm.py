@@ -6,14 +6,14 @@ import torch
 
 from ttla.config import load_config
 from ttla.deployment import DeploymentRunner
-from ttla.models import TTLAModel
+from ttla.models import TTLAModel, load_model_state
 from ttla.training import build_model
 
 
 def _load_model(cfg: dict, checkpoint_path: str, device: str) -> TTLAModel:
     payload = torch.load(checkpoint_path, map_location=device)
     model = build_model(cfg).to(device)
-    model.load_state_dict(payload["model_state"])
+    load_model_state(model, payload["model_state"])
     model.eval()
     return model
 

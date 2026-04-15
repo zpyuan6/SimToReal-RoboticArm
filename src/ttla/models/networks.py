@@ -185,6 +185,15 @@ def _extract_progress_bins(state: torch.Tensor, num_bins: int) -> torch.Tensor:
     return scaled.clamp(0, max(num_bins - 1, 0))
 
 
+def _predicted_stage_ids_from_latent(z: torch.Tensor, stage_head: nn.Module, stage_aux_classes: int) -> torch.Tensor:
+    if z.ndim == 1:
+        z = z.unsqueeze(0)
+    flat = z.reshape(-1, z.shape[-1])
+    stage_logits = stage_head(flat.detach())
+    stage_ids = stage_logits.argmax(dim=-1)
+    return stage_ids.clamp(0, max(stage_aux_classes - 1, 0)).view(*z.shape[:-1])
+
+
 def _stage_action_mask(
     task_ids: torch.Tensor,
     state: torch.Tensor,
@@ -380,8 +389,18 @@ class BaseTTLAModel(nn.Module, ABC):
             nn.Linear(adapter_hidden_dim, latent_dim),
             nn.Tanh(),
         )
+        self.adapter_task_embedding = nn.Embedding(task_vocab_size, task_embed_dim)
+        self.adapter_stage_embedding = nn.Embedding(stage_aux_classes, task_embed_dim)
+        self.adapter_condition = nn.Sequential(
+            nn.Linear(latent_dim + task_embed_dim * 2, adapter_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(adapter_hidden_dim, latent_dim),
+            nn.Tanh(),
+        )
         nn.init.zeros_(self.adapter[2].weight)
         nn.init.zeros_(self.adapter[2].bias)
+        nn.init.zeros_(self.adapter_condition[2].weight)
+        nn.init.zeros_(self.adapter_condition[2].bias)
 
     @property
     def backbone_type(self) -> str:
@@ -429,16 +448,104 @@ class BaseTTLAModel(nn.Module, ABC):
         delta = self.transition(torch.cat([z, action_emb, task_emb, stage_emb], dim=-1))
         return z + delta
 
-    def adapt(self, z: torch.Tensor) -> torch.Tensor:
-        return z + self.adapter(z) * self.adapter_scale
+    def _resolve_adapter_task_ids(
+        self,
+        z: torch.Tensor,
+        task_ids: torch.Tensor | None = None,
+        state: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if task_ids is None and state is None:
+            return torch.zeros(z.shape[0], dtype=torch.long, device=z.device)
+        return _resolve_task_ids(task_ids, state, self.task_vocab_size).to(device=z.device)
+
+    def _resolve_adapter_stage_ids(
+        self,
+        z: torch.Tensor,
+        stage_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if stage_ids is not None:
+            if stage_ids.ndim > 1:
+                stage_ids = stage_ids.squeeze(-1)
+            return stage_ids.long().clamp(0, max(self.stage_aux_classes - 1, 0)).to(device=z.device)
+        return _predicted_stage_ids_from_latent(z, self.stage_head, self.stage_aux_classes).reshape(-1)
+
+    def adapt(
+        self,
+        z: torch.Tensor,
+        task_ids: torch.Tensor | None = None,
+        state: torch.Tensor | None = None,
+        stage_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        original_shape = z.shape
+        if z.ndim == 1:
+            z = z.unsqueeze(0)
+        flat_z = z.reshape(-1, z.shape[-1])
+        if state is not None and state.ndim == z.ndim:
+            flat_state = state.reshape(-1, state.shape[-1])
+        else:
+            flat_state = state
+        if task_ids is not None and task_ids.ndim == z.ndim - 1:
+            flat_task_ids = task_ids.reshape(-1)
+        else:
+            flat_task_ids = task_ids
+        if stage_ids is not None and stage_ids.ndim == z.ndim - 1:
+            flat_stage_ids = stage_ids.reshape(-1)
+        else:
+            flat_stage_ids = stage_ids
+        resolved_task_ids = self._resolve_adapter_task_ids(flat_z, task_ids=flat_task_ids, state=flat_state)
+        resolved_stage_ids = self._resolve_adapter_stage_ids(flat_z, stage_ids=flat_stage_ids)
+        task_emb = self.adapter_task_embedding(resolved_task_ids)
+        stage_emb = self.adapter_stage_embedding(resolved_stage_ids)
+        base_delta = self.adapter(flat_z)
+        cond_delta = self.adapter_condition(torch.cat([flat_z, task_emb, stage_emb], dim=-1))
+        adapted = flat_z + (base_delta + cond_delta) * self.adapter_scale
+        return adapted.view(*original_shape)
+
+    def encode_adapted(
+        self,
+        image: torch.Tensor,
+        state: torch.Tensor,
+        task_ids: torch.Tensor | None = None,
+        prev_primitives: torch.Tensor | None = None,
+        stage_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        return self.adapt(
+            self.encode(image, state, task_ids=task_ids, prev_primitives=prev_primitives),
+            task_ids=task_ids,
+            state=state,
+            stage_ids=stage_ids,
+        )
+
+    def encode_step_adapted(
+        self,
+        image: torch.Tensor,
+        state: torch.Tensor,
+        runtime_state: Any = None,
+        task_ids: torch.Tensor | None = None,
+        stage_ids: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, Any]:
+        z, next_runtime_state = self.encode_step(image, state, runtime_state, task_ids=task_ids)
+        return self.adapt(z, task_ids=task_ids, state=state, stage_ids=stage_ids), next_runtime_state
 
     def freeze_backbone(self) -> None:
         for name, param in self.named_parameters():
-            if not name.startswith("adapter."):
+            if not (
+                name.startswith("adapter.")
+                or name.startswith("adapter_task_embedding.")
+                or name.startswith("adapter_stage_embedding.")
+                or name.startswith("adapter_condition.")
+            ):
                 param.requires_grad_(False)
 
     def adapter_parameters(self):
-        return self.adapter.parameters()
+        modules = [
+            self.adapter.parameters(),
+            self.adapter_task_embedding.parameters(),
+            self.adapter_stage_embedding.parameters(),
+            self.adapter_condition.parameters(),
+        ]
+        for params in modules:
+            yield from params
 
     def init_runtime_state(self, batch_size: int = 1, device: torch.device | None = None) -> Any:
         target_device = device or next(self.parameters()).device
@@ -556,6 +663,24 @@ class BaseTTLAModel(nn.Module, ABC):
         )
         return z, next_z
 
+    def compute_adapted_latents(self, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        task_ids = batch.get("task")
+        z = self.encode_adapted(
+            batch["image"],
+            batch["state"],
+            task_ids=task_ids,
+            prev_primitives=batch.get("prev_primitive_id"),
+            stage_ids=batch.get("stage_id"),
+        )
+        next_z = self.encode_adapted(
+            batch["next_image"],
+            batch["next_state"],
+            task_ids=task_ids,
+            prev_primitives=batch.get("next_prev_primitive_id"),
+            stage_ids=batch.get("next_stage_id"),
+        )
+        return z, next_z
+
     def compute_policy_loss(self, batch: dict[str, torch.Tensor], z: torch.Tensor) -> torch.Tensor:
         logits = self.condition_policy_logits(self.policy_logits(z), z=z, task_ids=batch.get("task"), state=batch.get("state"))
         return F.cross_entropy(logits, batch["primitive_id"])
@@ -575,8 +700,10 @@ class BaseTTLAModel(nn.Module, ABC):
     ) -> tuple[torch.Tensor, Any, torch.Tensor]:
         if runtime_state is None:
             runtime_state = self.init_runtime_state(batch_size=image.shape[0], device=image.device)
-        z, next_runtime_state = self.encode_step(image, state, runtime_state, task_ids=task_ids)
-        z_used = self.adapt(z) if use_adapter else z
+        if use_adapter:
+            z_used, next_runtime_state = self.encode_step_adapted(image, state, runtime_state, task_ids=task_ids)
+        else:
+            z_used, next_runtime_state = self.encode_step(image, state, runtime_state, task_ids=task_ids)
         logits = self.condition_policy_logits(self.policy_logits(z_used), z=z_used, task_ids=task_ids, state=state)
         primitive = logits.argmax(dim=-1)
         if isinstance(next_runtime_state, dict):
@@ -687,6 +814,24 @@ class RecurrentTTLAModel(BaseTTLAModel):
             nn.Linear(self.hidden_dim, self.action_dim),
         )
         self.prev_action_embedding = nn.Embedding(self.action_dim + 1, self.action_embed_dim)
+        self.feature_adapter = nn.Sequential(
+            nn.Linear(self.hidden_dim, kwargs.get("adapter_hidden_dim", 64)),
+            nn.ReLU(),
+            nn.Linear(kwargs.get("adapter_hidden_dim", 64), self.hidden_dim),
+            nn.Tanh(),
+        )
+        self.feature_adapter_task_embedding = nn.Embedding(self.task_vocab_size, self.task_embed_dim)
+        self.feature_adapter_progress_embedding = nn.Embedding(self.transition_stage_bins, self.task_embed_dim)
+        self.feature_adapter_condition = nn.Sequential(
+            nn.Linear(self.hidden_dim + self.task_embed_dim * 2, kwargs.get("adapter_hidden_dim", 64)),
+            nn.ReLU(),
+            nn.Linear(kwargs.get("adapter_hidden_dim", 64), self.hidden_dim),
+            nn.Tanh(),
+        )
+        nn.init.zeros_(self.feature_adapter[2].weight)
+        nn.init.zeros_(self.feature_adapter[2].bias)
+        nn.init.zeros_(self.feature_adapter_condition[2].weight)
+        nn.init.zeros_(self.feature_adapter_condition[2].bias)
 
     def _feature_step(
         self,
@@ -723,12 +868,27 @@ class RecurrentTTLAModel(BaseTTLAModel):
             "steps": 0,
         }
 
-    def encode_step(
+    def _adapt_feature(
+        self,
+        feature: torch.Tensor,
+        state: torch.Tensor,
+        task_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        resolved_task_ids = _resolve_task_ids(task_ids, state, self.task_vocab_size).to(device=feature.device)
+        progress_bins = _extract_progress_bins(state, self.transition_stage_bins).to(device=feature.device)
+        task_emb = self.feature_adapter_task_embedding(resolved_task_ids)
+        progress_emb = self.feature_adapter_progress_embedding(progress_bins)
+        base_delta = self.feature_adapter(feature)
+        cond_delta = self.feature_adapter_condition(torch.cat([feature, task_emb, progress_emb], dim=-1))
+        return feature + (base_delta + cond_delta) * self.adapter_scale
+
+    def _encode_step_internal(
         self,
         image: torch.Tensor,
         state: torch.Tensor,
         runtime_state: Any = None,
         task_ids: torch.Tensor | None = None,
+        use_adapter: bool = False,
     ) -> tuple[torch.Tensor, Any]:
         if runtime_state is None:
             runtime_state = self.init_runtime_state(batch_size=image.shape[0], device=image.device)
@@ -737,7 +897,10 @@ class RecurrentTTLAModel(BaseTTLAModel):
         steps = int(runtime_state.get("steps", 0))
         if hidden_state is None or (self.runtime_horizon > 0 and steps % self.runtime_horizon == 0):
             hidden_state = torch.zeros((1, image.shape[0], self.latent_dim), device=image.device, dtype=image.dtype)
-        feature = self._feature_step(image, state, task_ids=task_ids, prev_primitives=prev_primitive).unsqueeze(1)
+        feature = self._feature_step(image, state, task_ids=task_ids, prev_primitives=prev_primitive)
+        if use_adapter:
+            feature = self._adapt_feature(feature, state, task_ids=task_ids)
+        feature = feature.unsqueeze(1)
         output, next_hidden_state = self.gru(feature, hidden_state)
         z = output[:, -1]
         next_state = {
@@ -746,6 +909,26 @@ class RecurrentTTLAModel(BaseTTLAModel):
             "steps": steps + 1,
         }
         return z, next_state
+
+    def encode_step(
+        self,
+        image: torch.Tensor,
+        state: torch.Tensor,
+        runtime_state: Any = None,
+        task_ids: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, Any]:
+        return self._encode_step_internal(image, state, runtime_state, task_ids=task_ids, use_adapter=False)
+
+    def encode_step_adapted(
+        self,
+        image: torch.Tensor,
+        state: torch.Tensor,
+        runtime_state: Any = None,
+        task_ids: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, Any]:
+        z, next_runtime_state = self._encode_step_internal(image, state, runtime_state, task_ids=task_ids, use_adapter=True)
+        adapted_z = self.adapt(z, task_ids=task_ids, state=state)
+        return adapted_z, next_runtime_state
 
     def encode(
         self,
@@ -757,6 +940,16 @@ class RecurrentTTLAModel(BaseTTLAModel):
         z, _ = self.encode_step(image, state, None, task_ids=task_ids)
         return z
 
+    def encode_adapted(
+        self,
+        image: torch.Tensor,
+        state: torch.Tensor,
+        task_ids: torch.Tensor | None = None,
+        prev_primitives: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        z, _ = self.encode_step_adapted(image, state, None, task_ids=task_ids)
+        return z
+
     def encode_history(
         self,
         images: torch.Tensor,
@@ -765,6 +958,7 @@ class RecurrentTTLAModel(BaseTTLAModel):
         mask: torch.Tensor | None = None,
         task_ids: torch.Tensor | None = None,
         return_sequence: bool = False,
+        use_adapter: bool = False,
     ) -> torch.Tensor:
         batch_size, history_len = images.shape[:2]
         flat_images = images.reshape(batch_size * history_len, *images.shape[2:])
@@ -790,15 +984,24 @@ class RecurrentTTLAModel(BaseTTLAModel):
             flat_states,
             task_ids=expanded_task_ids,
             prev_primitives=flat_prev_primitives,
-        ).reshape(batch_size, history_len, self.hidden_dim)
+        )
+        if use_adapter:
+            fused = self._adapt_feature(fused, flat_states, task_ids=expanded_task_ids)
+        fused = fused.reshape(batch_size, history_len, self.hidden_dim)
         output, _ = self.gru(fused)
         if return_sequence:
-            return output
+            return self.adapt(output, task_ids=task_ids, state=states) if use_adapter else output
         if mask is None:
-            return output[:, -1]
+            z = output[:, -1]
+            return self.adapt(z, task_ids=task_ids, state=states[:, -1]) if use_adapter else z
         lengths = mask.long().sum(dim=1).clamp_min(1)
         gather_idx = (lengths - 1).view(-1, 1, 1).expand(-1, 1, output.shape[-1])
-        return output.gather(1, gather_idx).squeeze(1)
+        z = output.gather(1, gather_idx).squeeze(1)
+        if not use_adapter:
+            return z
+        batch_idx = torch.arange(states.shape[0], device=states.device)
+        final_states = states[batch_idx, lengths - 1]
+        return self.adapt(z, task_ids=task_ids, state=final_states)
 
     def compute_latents(self, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         if "history_images" not in batch:
@@ -817,6 +1020,28 @@ class RecurrentTTLAModel(BaseTTLAModel):
             batch.get("next_history_prev_primitives"),
             batch.get("next_history_mask"),
             task_ids=task_ids,
+        )
+        return z, next_z
+
+    def compute_adapted_latents(self, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        if "history_images" not in batch:
+            return super().compute_adapted_latents(batch)
+        task_ids = batch.get("task")
+        z = self.encode_history(
+            batch["history_images"],
+            batch["history_states"],
+            batch.get("history_prev_primitives"),
+            batch.get("history_mask"),
+            task_ids=task_ids,
+            use_adapter=True,
+        )
+        next_z = self.encode_history(
+            batch["next_history_images"],
+            batch["next_history_states"],
+            batch.get("next_history_prev_primitives"),
+            batch.get("next_history_mask"),
+            task_ids=task_ids,
+            use_adapter=True,
         )
         return z, next_z
 
@@ -870,12 +1095,42 @@ class RecurrentTTLAModel(BaseTTLAModel):
         use_adapter: bool = False,
         task_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, Any, torch.Tensor]:
-        z, next_runtime_state = self.encode_step(image, state, runtime_state, task_ids=task_ids)
-        z_used = self.adapt(z) if use_adapter else z
+        if use_adapter:
+            z_used, next_runtime_state = self.encode_step_adapted(image, state, runtime_state, task_ids=task_ids)
+        else:
+            z_used, next_runtime_state = self.encode_step(image, state, runtime_state, task_ids=task_ids)
         logits = self.condition_policy_logits(self.policy_logits(z_used), z=z_used, task_ids=task_ids, state=state)
         primitive = logits.argmax(dim=-1)
         next_runtime_state["prev_primitive"] = primitive.detach()
         return primitive, next_runtime_state, z_used
+
+    def freeze_backbone(self) -> None:
+        for name, param in self.named_parameters():
+            if not (
+                name.startswith("adapter.")
+                or name.startswith("adapter_task_embedding.")
+                or name.startswith("adapter_stage_embedding.")
+                or name.startswith("adapter_condition.")
+                or name.startswith("feature_adapter.")
+                or name.startswith("feature_adapter_task_embedding.")
+                or name.startswith("feature_adapter_progress_embedding.")
+                or name.startswith("feature_adapter_condition.")
+            ):
+                param.requires_grad_(False)
+
+    def adapter_parameters(self):
+        modules = [
+            self.adapter.parameters(),
+            self.adapter_task_embedding.parameters(),
+            self.adapter_stage_embedding.parameters(),
+            self.adapter_condition.parameters(),
+            self.feature_adapter.parameters(),
+            self.feature_adapter_task_embedding.parameters(),
+            self.feature_adapter_progress_embedding.parameters(),
+            self.feature_adapter_condition.parameters(),
+        ]
+        for params in modules:
+            yield from params
 
 
 class ChunkingTTLAModel(BaseTTLAModel):
@@ -1070,7 +1325,7 @@ class ChunkingTTLAModel(BaseTTLAModel):
         history_states = list(runtime_state["states"]) + [state]
         prev_history = list(runtime_state["prev_primitives"])
         z = self._encode_runtime_history(history_images, history_states, prev_history, task_ids=task_ids)
-        z_used = self.adapt(z) if use_adapter else z
+        z_used = self.adapt(z, task_ids=task_ids, state=state) if use_adapter else z
         chunk_logits = self.policy_chunk_logits(z_used)
         current_time = int(runtime_state.get("time", 0))
         predicted_chunks = list(runtime_state.get("predicted_chunks", []))
@@ -1241,11 +1496,30 @@ class DiffusionPrimitiveTTLAModel(BaseTTLAModel):
             nn.ReLU(),
             nn.Linear(self.hidden_dim, diffusion_dim),
         )
-        self.policy_head = nn.Sequential(
+        self.direct_head = nn.Sequential(
             nn.Linear(self.latent_dim, self.hidden_dim),
             nn.ReLU(),
             nn.Linear(self.hidden_dim, self.action_dim),
         )
+        self.policy_head = self.direct_head
+        self.condition_adapter = nn.Sequential(
+            nn.Linear(self.latent_dim, kwargs.get("adapter_hidden_dim", 64)),
+            nn.ReLU(),
+            nn.Linear(kwargs.get("adapter_hidden_dim", 64), self.latent_dim),
+            nn.Tanh(),
+        )
+        self.condition_adapter_task_embedding = nn.Embedding(self.task_vocab_size, self.task_embed_dim)
+        self.condition_adapter_stage_embedding = nn.Embedding(self.stage_aux_classes, self.task_embed_dim)
+        self.condition_adapter_condition = nn.Sequential(
+            nn.Linear(self.latent_dim + self.task_embed_dim * 2, kwargs.get("adapter_hidden_dim", 64)),
+            nn.ReLU(),
+            nn.Linear(kwargs.get("adapter_hidden_dim", 64), self.latent_dim),
+            nn.Tanh(),
+        )
+        nn.init.zeros_(self.condition_adapter[2].weight)
+        nn.init.zeros_(self.condition_adapter[2].bias)
+        nn.init.zeros_(self.condition_adapter_condition[2].weight)
+        nn.init.zeros_(self.condition_adapter_condition[2].bias)
 
     def encode(
         self,
@@ -1268,6 +1542,23 @@ class DiffusionPrimitiveTTLAModel(BaseTTLAModel):
         t_emb = self.time_embedding(timestep.long())
         return self.denoiser(torch.cat([z, noisy_action, t_emb], dim=-1))
 
+    def _condition_latent(
+        self,
+        z: torch.Tensor,
+        task_ids: torch.Tensor | None = None,
+        state: torch.Tensor | None = None,
+        stage_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if z.ndim == 1:
+            z = z.unsqueeze(0)
+        resolved_task_ids = self._resolve_adapter_task_ids(z, task_ids=task_ids, state=state)
+        resolved_stage_ids = self._resolve_adapter_stage_ids(z, stage_ids=stage_ids)
+        task_emb = self.condition_adapter_task_embedding(resolved_task_ids)
+        stage_emb = self.condition_adapter_stage_embedding(resolved_stage_ids)
+        base_delta = self.condition_adapter(z)
+        cond_delta = self.condition_adapter_condition(torch.cat([z, task_emb, stage_emb], dim=-1))
+        return z + (base_delta + cond_delta) * self.adapter_scale
+
     def _action_logits_from_embed(self, action_embed: torch.Tensor) -> torch.Tensor:
         return action_embed @ self.action_codebook.weight.t()
 
@@ -1277,7 +1568,7 @@ class DiffusionPrimitiveTTLAModel(BaseTTLAModel):
             timestep = torch.full((z.shape[0],), step, device=z.device, dtype=torch.long)
             action_embed = self._denoise(z, action_embed, timestep)
         diffusion_logits = self._action_logits_from_embed(action_embed)
-        direct_logits = self.policy_head(z)
+        direct_logits = self.direct_head(z)
         return direct_logits + self.diffusion_logit_blend * diffusion_logits
 
     def compute_policy_loss(self, batch: dict[str, torch.Tensor], z: torch.Tensor) -> torch.Tensor:
@@ -1290,7 +1581,7 @@ class DiffusionPrimitiveTTLAModel(BaseTTLAModel):
         pred_embed = self._denoise(z, noisy, timestep)
         loss_diffusion = F.mse_loss(pred_embed, target_embed)
         diffusion_logits = self._action_logits_from_embed(pred_embed)
-        direct_logits = self.policy_head(z)
+        direct_logits = self.direct_head(z)
         logits = self.condition_policy_logits(
             direct_logits + self.diffusion_logit_blend * diffusion_logits,
             z=z,
@@ -1299,6 +1590,80 @@ class DiffusionPrimitiveTTLAModel(BaseTTLAModel):
         )
         loss_ce = F.cross_entropy(logits, primitive_id)
         return loss_ce + self.diffusion_loss_weight * loss_diffusion
+
+    def encode_adapted(
+        self,
+        image: torch.Tensor,
+        state: torch.Tensor,
+        task_ids: torch.Tensor | None = None,
+        prev_primitives: torch.Tensor | None = None,
+        stage_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        z = super().encode_adapted(
+            image,
+            state,
+            task_ids=task_ids,
+            prev_primitives=prev_primitives,
+            stage_ids=stage_ids,
+        )
+        return self._condition_latent(z, task_ids=task_ids, state=state, stage_ids=stage_ids)
+
+    def encode_step_adapted(
+        self,
+        image: torch.Tensor,
+        state: torch.Tensor,
+        runtime_state: Any = None,
+        task_ids: torch.Tensor | None = None,
+        stage_ids: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, Any]:
+        z, next_runtime_state = super().encode_step_adapted(image, state, runtime_state, task_ids=task_ids)
+        return self._condition_latent(z, task_ids=task_ids, state=state, stage_ids=stage_ids), next_runtime_state
+
+    def compute_adapted_latents(self, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        task_ids = batch.get("task")
+        z = self.encode_adapted(
+            batch["image"],
+            batch["state"],
+            task_ids=task_ids,
+            prev_primitives=batch.get("prev_primitive_id"),
+            stage_ids=batch.get("stage_id"),
+        )
+        next_z = self.encode_adapted(
+            batch["next_image"],
+            batch["next_state"],
+            task_ids=task_ids,
+            prev_primitives=batch.get("next_prev_primitive_id"),
+            stage_ids=batch.get("next_stage_id"),
+        )
+        return z, next_z
+
+    def freeze_backbone(self) -> None:
+        for name, param in self.named_parameters():
+            if not (
+                name.startswith("adapter.")
+                or name.startswith("adapter_task_embedding.")
+                or name.startswith("adapter_stage_embedding.")
+                or name.startswith("adapter_condition.")
+                or name.startswith("condition_adapter.")
+                or name.startswith("condition_adapter_task_embedding.")
+                or name.startswith("condition_adapter_stage_embedding.")
+                or name.startswith("condition_adapter_condition.")
+            ):
+                param.requires_grad_(False)
+
+    def adapter_parameters(self):
+        modules = [
+            self.adapter.parameters(),
+            self.adapter_task_embedding.parameters(),
+            self.adapter_stage_embedding.parameters(),
+            self.adapter_condition.parameters(),
+            self.condition_adapter.parameters(),
+            self.condition_adapter_task_embedding.parameters(),
+            self.condition_adapter_stage_embedding.parameters(),
+            self.condition_adapter_condition.parameters(),
+        ]
+        for params in modules:
+            yield from params
 
 
 TTLAModel = FeedForwardTTLAModel

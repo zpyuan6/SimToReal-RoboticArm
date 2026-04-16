@@ -30,7 +30,20 @@ class RoArmSerialClient:
         return self.read_line()
 
     def move_joints(self, b: float, s: float, e: float, t: float = 0.0, r: float = 0.0, h: float = 3.14) -> None:
-        self.send({"T": 122, "b": b, "s": s, "e": e, "t": t, "r": r, "h": h, "spd": 10, "acc": 10})
+        angles_deg = np.rad2deg(np.asarray([b, s, e, t, r, h], dtype=float))
+        self.send(
+            {
+                "T": 122,
+                "b": float(angles_deg[0]),
+                "s": float(angles_deg[1]),
+                "e": float(angles_deg[2]),
+                "t": float(angles_deg[3]),
+                "r": float(angles_deg[4]),
+                "h": float(angles_deg[5]),
+                "spd": 10,
+                "acc": 10,
+            }
+        )
 
     def move_joint_vector(self, joints: np.ndarray) -> None:
         q = np.asarray(joints, dtype=float).reshape(-1)

@@ -168,19 +168,15 @@ def main() -> None:
                 changed = True
 
             if changed and serial_enabled:
-                last_command = robot.send(
-                    {
-                        "T": 122,
-                        "b": targets["b"],
-                        "s": targets["s"],
-                        "e": targets["e"],
-                        "t": 0.0,
-                        "r": 0.0,
-                        "h": 3.14,
-                        "spd": 10,
-                        "acc": 10,
-                    }
+                robot.move_joints(
+                    targets["b"],
+                    targets["s"],
+                    targets["e"],
+                    0.0,
+                    0.0,
+                    3.14,
                 )
+                last_command = robot.last_command or "none"
                 _append_jsonl(
                     log_path,
                     {

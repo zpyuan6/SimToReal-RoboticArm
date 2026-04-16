@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import argparse
+from typing import TYPE_CHECKING
 
 import torch
 
 from ttla.config import load_config
 from ttla.deployment import DeploymentRunner
 from ttla.models import TTLAModel, load_model_state
-from ttla.training import build_model
+
+if TYPE_CHECKING:
+    from ttla.training import build_model
 
 
 def _load_model(cfg: dict, checkpoint_path: str, device: str) -> TTLAModel:
+    from ttla.training import build_model
+
     payload = torch.load(checkpoint_path, map_location=device)
     model = build_model(cfg).to(device)
     load_model_state(model, payload["model_state"])

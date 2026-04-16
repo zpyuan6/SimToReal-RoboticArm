@@ -22,9 +22,9 @@ Thumbs.db
 tmp/
 
 # Generated datasets and logs
-data/
-results/
-figures/
+data/*
+results/*
+figures/*
 
 # Keep only experiment configs, ignore any local experiment artifacts
 experiments/*

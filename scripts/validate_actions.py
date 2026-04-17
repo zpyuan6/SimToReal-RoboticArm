@@ -14,14 +14,16 @@ from ttla.config import load_config
 from ttla.deployment import DeploymentRunner
 from ttla.deployment.primitives import (
     REAL_CARRY_QPOS,
-    REAL_DROPZONE_QPOS,
     REAL_GRIPPER_CLOSED_QPOS,
     REAL_GRIPPER_OPEN_QPOS,
     REAL_HOME_QPOS,
+    REAL_PLACE_RELEASE_QPOS,
+    REAL_DROPZONE_HOVER_QPOS,
     REAL_OBS_CENTER_QPOS,
     REAL_OBS_LEFT_QPOS,
     REAL_OBS_RIGHT_QPOS,
     REAL_PREALIGN_QPOS,
+    REAL_PREGRASP_ANCHOR_QPOS,
 )
 from ttla.sim import RoArmSimEnv
 from ttla.sim.skills import (
@@ -250,18 +252,18 @@ def _expected_next_real_qpos(current_q: np.ndarray, primitive_id: int) -> np.nda
     if primitive_id == RETREAT_ID:
         return current_q + np.asarray([0.0, 0.10, 0.14, -0.06, 0.0, 0.10], dtype=np.float32)
     if primitive_id == PREGRASP_SERVO_ID:
-        next_q = REAL_PREALIGN_QPOS.copy() + np.asarray([0.0, -0.04, -0.04, 0.02, 0.0, -0.04], dtype=np.float32)
+        next_q = REAL_PREGRASP_ANCHOR_QPOS.copy() + np.asarray([0.0, -0.02, -0.03, 0.01, 0.0, -0.03], dtype=np.float32)
         return next_q
     if primitive_id == GRASP_EXECUTE_ID:
-        next_q = current_q + np.asarray([0.0, -0.08, -0.10, 0.05, 0.0, 0.0], dtype=np.float32)
+        next_q = current_q + np.asarray([0.0, -0.05, -0.08, 0.03, 0.0, 0.0], dtype=np.float32)
         next_q[5] = REAL_GRIPPER_CLOSED_QPOS
         return next_q
     if primitive_id == LIFT_OBJECT_ID:
         return REAL_CARRY_QPOS.copy()
     if primitive_id == TRANSPORT_TO_DROPZONE_ID:
-        return REAL_DROPZONE_QPOS.copy()
+        return REAL_DROPZONE_HOVER_QPOS.copy()
     if primitive_id == PLACE_OBJECT_ID:
-        next_q = current_q + np.asarray([0.0, 0.08, -0.05, 0.0, 0.0, 0.0], dtype=np.float32)
+        next_q = REAL_PLACE_RELEASE_QPOS.copy()
         next_q[5] = REAL_GRIPPER_OPEN_QPOS
         return next_q
     if primitive_id == ABORT_ID:

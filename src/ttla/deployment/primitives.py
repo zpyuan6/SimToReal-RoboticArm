@@ -43,7 +43,9 @@ REAL_OBS_LEFT_QPOS = np.deg2rad(np.asarray([12.0, 12.0, 108.0, 18.0, 0.0, 158.0]
 REAL_OBS_RIGHT_QPOS = np.deg2rad(np.asarray([-12.0, 12.0, 108.0, 18.0, 0.0, 158.0], dtype=np.float32))
 REAL_PREALIGN_QPOS = np.deg2rad(np.asarray([0.0, 18.0, 118.0, 26.0, 0.0, 154.0], dtype=np.float32))
 REAL_CARRY_QPOS = np.deg2rad(np.asarray([0.0, -8.0, 96.0, -8.0, 0.0, 170.0], dtype=np.float32))
-REAL_DROPZONE_QPOS = np.deg2rad(np.asarray([-20.0, -10.0, 98.0, -10.0, 0.0, 168.0], dtype=np.float32))
+REAL_PREGRASP_ANCHOR_QPOS = np.deg2rad(np.asarray([0.0, 22.0, 112.0, -6.0, 0.0, 158.0], dtype=np.float32))
+REAL_DROPZONE_HOVER_QPOS = np.deg2rad(np.asarray([-20.0, 6.0, 139.0, -12.0, 0.0, 168.0], dtype=np.float32))
+REAL_PLACE_RELEASE_QPOS = np.deg2rad(np.asarray([-20.0, 10.0, 148.0, -8.0, 0.0, 168.0], dtype=np.float32))
 REAL_GRIPPER_HOME_QPOS = np.deg2rad(np.float32(170.0))
 REAL_GRIPPER_OPEN_QPOS = np.deg2rad(np.float32(60.0))
 REAL_GRIPPER_CLOSED_QPOS = np.deg2rad(np.float32(180.0))
@@ -93,22 +95,27 @@ class PrimitiveExecutor:
             self._goto(REAL_OBS_CENTER_QPOS)
             return PrimitiveResult(True, False, False, {"primitive_name": name})
         if primitive_id_value == PREGRASP_SERVO_ID:
-            # On real hardware this remains a short closed-loop primitive placeholder.
-            self._goto(REAL_PREALIGN_QPOS)
-            self._delta(np.asarray([0.0, -0.04, -0.04, 0.02, 0.0, -0.04], dtype=np.float32))
+            # Move from coarse prealign into a lower anchor pose that better
+            # matches the updated simulator grasp staging posture.
+            self._goto(REAL_PREGRASP_ANCHOR_QPOS)
+            self._delta(np.asarray([0.0, -0.02, -0.03, 0.01, 0.0, -0.03], dtype=np.float32))
             return PrimitiveResult(True, False, False, {"primitive_name": name, "mode": "servo_stub"})
         if primitive_id_value == GRASP_EXECUTE_ID:
-            self._delta(np.asarray([0.0, -0.08, -0.10, 0.05, 0.0, 0.0], dtype=np.float32))
+            # Descend from the pregrasp anchor before closing the gripper.
+            self._delta(np.asarray([0.0, -0.05, -0.08, 0.03, 0.0, 0.0], dtype=np.float32))
             self._set_gripper(REAL_GRIPPER_CLOSED_QPOS)
             return PrimitiveResult(True, False, False, {"primitive_name": name})
         if primitive_id_value == LIFT_OBJECT_ID:
             self._goto(REAL_CARRY_QPOS)
             return PrimitiveResult(True, False, False, {"primitive_name": name})
         if primitive_id_value == TRANSPORT_TO_DROPZONE_ID:
-            self._goto(REAL_DROPZONE_QPOS)
+            # Hover over the drop zone before the release primitive lowers.
+            self._goto(REAL_DROPZONE_HOVER_QPOS)
             return PrimitiveResult(True, False, False, {"primitive_name": name})
         if primitive_id_value == PLACE_OBJECT_ID:
-            self._delta(np.asarray([0.0, 0.08, -0.05, 0.0, 0.0, 0.0], dtype=np.float32))
+            # Explicitly lower into the release pose instead of opening from the
+            # hover posture, which previously caused releases to happen too high.
+            self._goto(REAL_PLACE_RELEASE_QPOS)
             self._set_gripper(REAL_GRIPPER_OPEN_QPOS)
             return PrimitiveResult(True, False, False, {"primitive_name": name})
         if primitive_id_value == HOLD_POSITION_ID:

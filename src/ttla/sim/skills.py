@@ -60,13 +60,17 @@ PLACE_OBJECT_ID = 13
 HOLD_POSITION_ID = 14
 ABORT_ID = 15
 
-HOME_QPOS = np.asarray([0.0, 0.0, 2.618, -1.0472, 0.0, 0.85], dtype=np.float32)
-OBS_CENTER_QPOS = np.asarray([0.0, -0.10, 2.55, -1.18, 0.0, 0.95], dtype=np.float32)
-OBS_LEFT_QPOS = np.asarray([0.35, -0.10, 2.55, -1.18, 0.0, 0.95], dtype=np.float32)
-OBS_RIGHT_QPOS = np.asarray([-0.35, -0.10, 2.55, -1.18, 0.0, 0.95], dtype=np.float32)
-PREALIGN_BASE_QPOS = np.asarray([0.0, -0.28, 2.30, -1.20, 0.0, 1.05], dtype=np.float32)
-CARRY_QPOS = np.asarray([0.0, -0.42, 2.08, -0.86, 0.0, 0.22], dtype=np.float32)
-DROPZONE_QPOS = np.asarray([-0.55, -0.38, 2.00, -0.78, 0.0, 0.24], dtype=np.float32)
+# These simulator pose presets are intentionally aligned to the real-arm
+# primitive validator mapping rather than the older MuJoCo-authored defaults.
+# The goal is to keep primitive semantics consistent across real and simulated
+# execution without retraining the policy backbone.
+HOME_QPOS = np.asarray([0.0, 0.0, 1.5708, 0.0, 0.0, 0.1964], dtype=np.float32)
+OBS_CENTER_QPOS = np.asarray([0.0, 0.2094, 1.8850, 0.3142, 0.0, 0.4320], dtype=np.float32)
+OBS_LEFT_QPOS = np.asarray([0.35, 0.2094, 1.8850, 0.3142, 0.0, 0.4320], dtype=np.float32)
+OBS_RIGHT_QPOS = np.asarray([-0.35, 0.2094, 1.8850, 0.3142, 0.0, 0.4320], dtype=np.float32)
+PREALIGN_BASE_QPOS = np.asarray([0.0, 0.3142, 2.0595, 0.4538, 0.0, 0.5105], dtype=np.float32)
+CARRY_QPOS = np.asarray([0.0, -0.1396, 1.6755, -0.1396, 0.0, 0.1964], dtype=np.float32)
+DROPZONE_QPOS = np.asarray([-0.5833, -0.1745, 1.7104, -0.1745, 0.0, 0.2356], dtype=np.float32)
 
 
 LEVEL1_PRIMITIVES = (

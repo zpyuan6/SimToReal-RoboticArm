@@ -115,24 +115,15 @@ JOINT_MAPPING["base"]["scale"], JOINT_MAPPING["base"]["offset"] = _fit_two_point
     REAL_OBS_RIGHT_QPOS[0],
     SIM_OBS_RIGHT_QPOS[0],
 )
-JOINT_MAPPING["shoulder"]["scale"], JOINT_MAPPING["shoulder"]["offset"] = _fit_two_point_map(
-    REAL_HOME_QPOS[1],
-    SIM_HOME_QPOS[1],
-    REAL_PREALIGN_QPOS[1],
-    SIM_PREALIGN_BASE_QPOS[1],
-)
-JOINT_MAPPING["elbow"]["scale"], JOINT_MAPPING["elbow"]["offset"] = _fit_two_point_map(
-    REAL_HOME_QPOS[2],
-    SIM_HOME_QPOS[2],
-    REAL_PREALIGN_QPOS[2],
-    SIM_PREALIGN_BASE_QPOS[2],
-)
-JOINT_MAPPING["wrist_pitch"]["scale"], JOINT_MAPPING["wrist_pitch"]["offset"] = _fit_two_point_map(
-    REAL_HOME_QPOS[3],
-    SIM_HOME_QPOS[3],
-    REAL_PREALIGN_QPOS[3],
-    SIM_PREALIGN_BASE_QPOS[3],
-)
+# Real RoArm and the simplified MuJoCo model already share the same physical
+# angle units and comparable joint limits for shoulder / elbow / wrist_pitch.
+# Using task-pose fitting here flips the visual direction for some axes because
+# the simulator task presets were authored in a different pose convention.
+# Keep these joints in direct angle correspondence and only fit the base yaw
+# amplitude from the observed left/right observation anchors.
+JOINT_MAPPING["shoulder"]["scale"], JOINT_MAPPING["shoulder"]["offset"] = 1.0, 0.0
+JOINT_MAPPING["elbow"]["scale"], JOINT_MAPPING["elbow"]["offset"] = 1.0, 0.0
+JOINT_MAPPING["wrist_pitch"]["scale"], JOINT_MAPPING["wrist_pitch"]["offset"] = 1.0, 0.0
 
 def _map_joint_real_to_sim(joint_idx: int, value: float) -> np.float32:
     # Joint indices 0-4 already use compatible semantics in this validator, so

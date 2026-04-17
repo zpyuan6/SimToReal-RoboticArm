@@ -47,6 +47,8 @@ REAL_DROPZONE_QPOS = np.deg2rad(np.asarray([-20.0, -10.0, 98.0, -10.0, 0.0, 168.
 REAL_GRIPPER_HOME_QPOS = np.deg2rad(np.float32(170.0))
 REAL_GRIPPER_OPEN_QPOS = np.deg2rad(np.float32(60.0))
 REAL_GRIPPER_CLOSED_QPOS = np.deg2rad(np.float32(180.0))
+REAL_GRIPPER_MIN_QPOS = np.deg2rad(np.float32(45.0))
+REAL_GRIPPER_MAX_QPOS = np.deg2rad(np.float32(180.0))
 
 
 @dataclass
@@ -135,5 +137,5 @@ class PrimitiveExecutor:
 
     def _set_gripper(self, value: float) -> None:
         q_target = self.current_q.copy()
-        q_target[5] = value
+        q_target[5] = np.clip(value, REAL_GRIPPER_MIN_QPOS, REAL_GRIPPER_MAX_QPOS)
         self._goto(q_target)

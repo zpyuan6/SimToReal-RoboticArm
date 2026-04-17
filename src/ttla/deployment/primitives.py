@@ -39,8 +39,8 @@ from ..sim.skills import (
 # documented zero positions and joint directions.
 REAL_HOME_QPOS = np.deg2rad(np.asarray([0.0, 0.0, 90.0, 0.0, 0.0, 170.0], dtype=np.float32))
 REAL_OBS_CENTER_QPOS = np.deg2rad(np.asarray([0.0, 12.0, 108.0, 18.0, 0.0, 158.0], dtype=np.float32))
-REAL_OBS_LEFT_QPOS = np.deg2rad(np.asarray([12.0, 12.0, 108.0, 18.0, 0.0, 158.0], dtype=np.float32))
-REAL_OBS_RIGHT_QPOS = np.deg2rad(np.asarray([-12.0, 12.0, 108.0, 18.0, 0.0, 158.0], dtype=np.float32))
+REAL_OBS_LEFT_QPOS = np.deg2rad(np.asarray([15.0, 12.0, 108.0, 18.0, 0.0, 158.0], dtype=np.float32))
+REAL_OBS_RIGHT_QPOS = np.deg2rad(np.asarray([-15.0, 12.0, 108.0, 18.0, 0.0, 158.0], dtype=np.float32))
 REAL_PREALIGN_QPOS = np.deg2rad(np.asarray([0.0, 18.0, 118.0, 26.0, 0.0, 154.0], dtype=np.float32))
 REAL_CARRY_QPOS = np.deg2rad(np.asarray([0.0, -8.0, 96.0, -8.0, 0.0, 180.0], dtype=np.float32))
 REAL_PREGRASP_ANCHOR_QPOS = np.deg2rad(np.asarray([0.0, 22.0, 112.0, -6.0, 0.0, 158.0], dtype=np.float32))

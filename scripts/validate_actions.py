@@ -31,16 +31,9 @@ from ttla.sim.skills import (
     GRASP_EXECUTE_ID,
     LIFT_OBJECT_ID,
     OBS_CENTER_ID,
-    OBS_CENTER_QPOS as SIM_OBS_CENTER_QPOS,
     OBS_LEFT_ID,
-    OBS_LEFT_QPOS as SIM_OBS_LEFT_QPOS,
     OBS_RIGHT_ID,
-    OBS_RIGHT_QPOS as SIM_OBS_RIGHT_QPOS,
     PLACE_OBJECT_ID,
-    CARRY_QPOS as SIM_CARRY_QPOS,
-    DROPZONE_QPOS as SIM_DROPZONE_QPOS,
-    HOME_QPOS as SIM_HOME_QPOS,
-    PREALIGN_BASE_QPOS as SIM_PREALIGN_BASE_QPOS,
     PREALIGN_GRASP_ID,
     PREGRASP_SERVO_ID,
     PRIMITIVE_NAMES,
@@ -64,57 +57,28 @@ SUCCESS = (44, 142, 86)
 WARN = (204, 129, 54)
 
 
-# The validator maps real-robot joint targets into simulator qpos space instead
-# of hand-tuning each simulated pose. We fit one affine map per joint using a
-# small set of paired real/sim reference poses.
-REAL_POSE_REFERENCES = np.stack(
-    [
-        REAL_HOME_QPOS,
-        REAL_OBS_CENTER_QPOS,
-        REAL_OBS_LEFT_QPOS,
-        REAL_OBS_RIGHT_QPOS,
-        REAL_PREALIGN_QPOS,
-        REAL_CARRY_QPOS,
-        REAL_DROPZONE_QPOS,
-    ],
-    axis=0,
-).astype(np.float32)
-SIM_POSE_REFERENCES = np.stack(
-    [
-        SIM_HOME_QPOS,
-        SIM_OBS_CENTER_QPOS,
-        SIM_OBS_LEFT_QPOS,
-        SIM_OBS_RIGHT_QPOS,
-        SIM_PREALIGN_BASE_QPOS,
-        SIM_CARRY_QPOS,
-        SIM_DROPZONE_QPOS,
-    ],
-    axis=0,
-).astype(np.float32)
+# Keep the arm joints on the real-aligned poses we already validated, and only
+# map the gripper into simulator qpos space. The simulator hand opens with a
+# larger qpos, while the real RoArm hand opens with a smaller angle.
+VALIDATION_SIM_GRIPPER_OPEN_QPOS = np.float32(1.45)
+VALIDATION_SIM_GRIPPER_CLOSED_QPOS = np.float32(0.05)
 
 
-def _fit_affine_map(real_refs: np.ndarray, sim_refs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    slopes = np.zeros(real_refs.shape[1], dtype=np.float32)
-    intercepts = np.zeros(real_refs.shape[1], dtype=np.float32)
-    for joint_idx in range(real_refs.shape[1]):
-        x = real_refs[:, joint_idx].astype(np.float64)
-        y = sim_refs[:, joint_idx].astype(np.float64)
-        if np.allclose(x, x[0]):
-            slopes[joint_idx] = 0.0
-            intercepts[joint_idx] = np.float32(np.mean(y))
-            continue
-        design = np.stack([x, np.ones_like(x)], axis=1)
-        solution, *_ = np.linalg.lstsq(design, y, rcond=None)
-        slopes[joint_idx] = np.float32(solution[0])
-        intercepts[joint_idx] = np.float32(solution[1])
-    return slopes, intercepts
-
-
-REAL_TO_SIM_SLOPE, REAL_TO_SIM_INTERCEPT = _fit_affine_map(REAL_POSE_REFERENCES, SIM_POSE_REFERENCES)
+def _map_real_gripper_to_sim(real_gripper_q: float) -> np.float32:
+    real_open = float(REAL_GRIPPER_OPEN_QPOS)
+    real_closed = float(REAL_GRIPPER_CLOSED_QPOS)
+    sim_open = float(VALIDATION_SIM_GRIPPER_OPEN_QPOS)
+    sim_closed = float(VALIDATION_SIM_GRIPPER_CLOSED_QPOS)
+    slope = (sim_closed - sim_open) / (real_closed - real_open)
+    intercept = sim_open - slope * real_open
+    mapped = slope * float(real_gripper_q) + intercept
+    return np.float32(np.clip(mapped, 0.0, 1.5))
 
 
 def _map_real_to_sim_qpos(real_q: np.ndarray) -> np.ndarray:
-    return (REAL_TO_SIM_SLOPE * np.asarray(real_q, dtype=np.float32) + REAL_TO_SIM_INTERCEPT).astype(np.float32)
+    sim_q = np.asarray(real_q, dtype=np.float32).copy()
+    sim_q[5] = _map_real_gripper_to_sim(sim_q[5])
+    return sim_q
 
 
 def _parse_args() -> argparse.Namespace:

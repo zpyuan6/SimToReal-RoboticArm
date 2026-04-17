@@ -15,7 +15,6 @@ from ttla.deployment import DeploymentRunner
 from ttla.deployment.primitives import (
     REAL_CARRY_QPOS,
     REAL_DROPZONE_QPOS,
-    REAL_HOME_QPOS,
     REAL_OBS_CENTER_QPOS,
     REAL_OBS_LEFT_QPOS,
     REAL_OBS_RIGHT_QPOS,
@@ -53,6 +52,20 @@ SUBTLE = (98, 108, 125)
 ACCENT = (54, 106, 255)
 SUCCESS = (44, 142, 86)
 WARN = (204, 129, 54)
+
+
+# Validation-only gripper references. The real robot start pose is already
+# behaving reasonably, while the simulated reference looked visually inverted,
+# so we keep the arm poses but remap the gripper values used by the validator.
+VALIDATION_GRIPPER_OPEN = np.deg2rad(170.0).astype(np.float32)
+VALIDATION_GRIPPER_CLOSED = np.deg2rad(60.0).astype(np.float32)
+VALIDATION_HOME_QPOS = REAL_OBS_CENTER_QPOS.copy()
+VALIDATION_HOME_QPOS[0] = 0.0
+VALIDATION_HOME_QPOS[1] = 0.0
+VALIDATION_HOME_QPOS[2] = np.deg2rad(90.0).astype(np.float32)
+VALIDATION_HOME_QPOS[3] = 0.0
+VALIDATION_HOME_QPOS[4] = 0.0
+VALIDATION_HOME_QPOS[5] = VALIDATION_GRIPPER_OPEN
 
 
 def _parse_args() -> argparse.Namespace:
@@ -131,10 +144,16 @@ def _apply_expected_qpos(sim_env: RoArmSimEnv, qpos: np.ndarray) -> None:
 
 def _expected_observe_pose(primitive_id: int) -> np.ndarray:
     if primitive_id == OBS_LEFT_ID:
-        return REAL_OBS_LEFT_QPOS.copy()
+        q = REAL_OBS_LEFT_QPOS.copy()
+        q[5] = VALIDATION_GRIPPER_OPEN
+        return q
     if primitive_id == OBS_RIGHT_ID:
-        return REAL_OBS_RIGHT_QPOS.copy()
-    return REAL_OBS_CENTER_QPOS.copy()
+        q = REAL_OBS_RIGHT_QPOS.copy()
+        q[5] = VALIDATION_GRIPPER_OPEN
+        return q
+    q = REAL_OBS_CENTER_QPOS.copy()
+    q[5] = VALIDATION_GRIPPER_OPEN
+    return q
 
 
 def _expected_next_qpos(current_q: np.ndarray, primitive_id: int) -> np.ndarray:
@@ -142,9 +161,13 @@ def _expected_next_qpos(current_q: np.ndarray, primitive_id: int) -> np.ndarray:
     if primitive_id in (OBS_LEFT_ID, OBS_RIGHT_ID, OBS_CENTER_ID):
         return _expected_observe_pose(primitive_id)
     if primitive_id == PREALIGN_GRASP_ID:
-        return REAL_PREALIGN_QPOS.copy()
+        q = REAL_PREALIGN_QPOS.copy()
+        q[5] = VALIDATION_GRIPPER_OPEN
+        return q
     if primitive_id == REOBSERVE_ID:
-        return REAL_OBS_CENTER_QPOS.copy()
+        q = REAL_OBS_CENTER_QPOS.copy()
+        q[5] = VALIDATION_GRIPPER_OPEN
+        return q
     if primitive_id == APPROACH_COARSE_ID:
         return current_q + np.asarray([0.0, -0.12, -0.16, 0.08, 0.0, 0.0], dtype=np.float32)
     if primitive_id == APPROACH_FINE_ID:
@@ -152,21 +175,27 @@ def _expected_next_qpos(current_q: np.ndarray, primitive_id: int) -> np.ndarray:
     if primitive_id == RETREAT_ID:
         return current_q + np.asarray([0.0, 0.10, 0.14, -0.06, 0.0, 0.10], dtype=np.float32)
     if primitive_id == PREGRASP_SERVO_ID:
-        return REAL_PREALIGN_QPOS.copy() + np.asarray([0.0, -0.04, -0.04, 0.02, 0.0, -0.04], dtype=np.float32)
+        next_q = REAL_PREALIGN_QPOS.copy() + np.asarray([0.0, -0.04, -0.04, 0.02, 0.0, 0.0], dtype=np.float32)
+        next_q[5] = VALIDATION_GRIPPER_OPEN
+        return next_q
     if primitive_id == GRASP_EXECUTE_ID:
         next_q = current_q + np.asarray([0.0, -0.08, -0.10, 0.05, 0.0, 0.0], dtype=np.float32)
-        next_q[5] = 0.18
+        next_q[5] = VALIDATION_GRIPPER_CLOSED
         return next_q
     if primitive_id == LIFT_OBJECT_ID:
-        return REAL_CARRY_QPOS.copy()
+        q = REAL_CARRY_QPOS.copy()
+        q[5] = VALIDATION_GRIPPER_CLOSED
+        return q
     if primitive_id == TRANSPORT_TO_DROPZONE_ID:
-        return REAL_DROPZONE_QPOS.copy()
+        q = REAL_DROPZONE_QPOS.copy()
+        q[5] = VALIDATION_GRIPPER_CLOSED
+        return q
     if primitive_id == PLACE_OBJECT_ID:
         next_q = current_q + np.asarray([0.0, 0.08, -0.05, 0.0, 0.0, 0.0], dtype=np.float32)
-        next_q[5] = 1.05
+        next_q[5] = VALIDATION_GRIPPER_OPEN
         return next_q
     if primitive_id == ABORT_ID:
-        return REAL_HOME_QPOS.copy()
+        return VALIDATION_HOME_QPOS.copy()
     return current_q
 
 
@@ -265,7 +294,7 @@ def main() -> None:
         cv2.resizeWindow(REAL_WINDOW_NAME, 1320, 1020)
 
     obs = sim_env.reset(task_name=args.task)
-    expected_q = REAL_HOME_QPOS.copy()
+    expected_q = VALIDATION_HOME_QPOS.copy()
     _apply_expected_qpos(sim_env, expected_q)
     if deploy_cfg.get("safety", {}).get("reset_before_episode", True):
         runner.robot.reset_pose()

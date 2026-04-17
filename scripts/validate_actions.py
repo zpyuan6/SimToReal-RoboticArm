@@ -15,6 +15,9 @@ from ttla.deployment import DeploymentRunner
 from ttla.deployment.primitives import (
     REAL_CARRY_QPOS,
     REAL_DROPZONE_QPOS,
+    REAL_GRIPPER_CLOSED_QPOS,
+    REAL_GRIPPER_OPEN_QPOS,
+    REAL_HOME_QPOS,
     REAL_OBS_CENTER_QPOS,
     REAL_OBS_LEFT_QPOS,
     REAL_OBS_RIGHT_QPOS,
@@ -25,15 +28,19 @@ from ttla.sim.skills import (
     ABORT_ID,
     APPROACH_COARSE_ID,
     APPROACH_FINE_ID,
-    CARRY_QPOS,
     GRASP_EXECUTE_ID,
-    HOME_QPOS,
     LIFT_OBJECT_ID,
     OBS_CENTER_ID,
+    OBS_CENTER_QPOS as SIM_OBS_CENTER_QPOS,
     OBS_LEFT_ID,
+    OBS_LEFT_QPOS as SIM_OBS_LEFT_QPOS,
     OBS_RIGHT_ID,
+    OBS_RIGHT_QPOS as SIM_OBS_RIGHT_QPOS,
     PLACE_OBJECT_ID,
-    PREALIGN_BASE_QPOS,
+    CARRY_QPOS as SIM_CARRY_QPOS,
+    DROPZONE_QPOS as SIM_DROPZONE_QPOS,
+    HOME_QPOS as SIM_HOME_QPOS,
+    PREALIGN_BASE_QPOS as SIM_PREALIGN_BASE_QPOS,
     PREALIGN_GRASP_ID,
     PREGRASP_SERVO_ID,
     PRIMITIVE_NAMES,
@@ -57,23 +64,57 @@ SUCCESS = (44, 142, 86)
 WARN = (204, 129, 54)
 
 
-# Validation-only gripper references use the simulator's native qpos semantics.
-# In the MuJoCo model, larger values open the gripper wider and smaller values
-# close it, which is the opposite numeric direction from the real RoArm hand.
-# These values are tuned for visual alignment with the real robot:
-# - home: fingers nearly parallel
-# - closed: slightly tighter than home
-# - open: near the simulator's maximum visible opening
-VALIDATION_GRIPPER_OPEN = np.float32(1.45)
-VALIDATION_GRIPPER_HOME = np.float32(0.20)
-VALIDATION_GRIPPER_CLOSED = np.float32(0.05)
-VALIDATION_HOME_QPOS = REAL_OBS_CENTER_QPOS.copy()
-VALIDATION_HOME_QPOS[0] = 0.0
-VALIDATION_HOME_QPOS[1] = 0.0
-VALIDATION_HOME_QPOS[2] = np.deg2rad(90.0).astype(np.float32)
-VALIDATION_HOME_QPOS[3] = 0.0
-VALIDATION_HOME_QPOS[4] = 0.0
-VALIDATION_HOME_QPOS[5] = VALIDATION_GRIPPER_HOME
+# The validator maps real-robot joint targets into simulator qpos space instead
+# of hand-tuning each simulated pose. We fit one affine map per joint using a
+# small set of paired real/sim reference poses.
+REAL_POSE_REFERENCES = np.stack(
+    [
+        REAL_HOME_QPOS,
+        REAL_OBS_CENTER_QPOS,
+        REAL_OBS_LEFT_QPOS,
+        REAL_OBS_RIGHT_QPOS,
+        REAL_PREALIGN_QPOS,
+        REAL_CARRY_QPOS,
+        REAL_DROPZONE_QPOS,
+    ],
+    axis=0,
+).astype(np.float32)
+SIM_POSE_REFERENCES = np.stack(
+    [
+        SIM_HOME_QPOS,
+        SIM_OBS_CENTER_QPOS,
+        SIM_OBS_LEFT_QPOS,
+        SIM_OBS_RIGHT_QPOS,
+        SIM_PREALIGN_BASE_QPOS,
+        SIM_CARRY_QPOS,
+        SIM_DROPZONE_QPOS,
+    ],
+    axis=0,
+).astype(np.float32)
+
+
+def _fit_affine_map(real_refs: np.ndarray, sim_refs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    slopes = np.zeros(real_refs.shape[1], dtype=np.float32)
+    intercepts = np.zeros(real_refs.shape[1], dtype=np.float32)
+    for joint_idx in range(real_refs.shape[1]):
+        x = real_refs[:, joint_idx].astype(np.float64)
+        y = sim_refs[:, joint_idx].astype(np.float64)
+        if np.allclose(x, x[0]):
+            slopes[joint_idx] = 0.0
+            intercepts[joint_idx] = np.float32(np.mean(y))
+            continue
+        design = np.stack([x, np.ones_like(x)], axis=1)
+        solution, *_ = np.linalg.lstsq(design, y, rcond=None)
+        slopes[joint_idx] = np.float32(solution[0])
+        intercepts[joint_idx] = np.float32(solution[1])
+    return slopes, intercepts
+
+
+REAL_TO_SIM_SLOPE, REAL_TO_SIM_INTERCEPT = _fit_affine_map(REAL_POSE_REFERENCES, SIM_POSE_REFERENCES)
+
+
+def _map_real_to_sim_qpos(real_q: np.ndarray) -> np.ndarray:
+    return (REAL_TO_SIM_SLOPE * np.asarray(real_q, dtype=np.float32) + REAL_TO_SIM_INTERCEPT).astype(np.float32)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -152,30 +193,20 @@ def _apply_expected_qpos(sim_env: RoArmSimEnv, qpos: np.ndarray) -> None:
 
 def _expected_observe_pose(primitive_id: int) -> np.ndarray:
     if primitive_id == OBS_LEFT_ID:
-        q = REAL_OBS_LEFT_QPOS.copy()
-        q[5] = VALIDATION_GRIPPER_HOME
-        return q
+        return REAL_OBS_LEFT_QPOS.copy()
     if primitive_id == OBS_RIGHT_ID:
-        q = REAL_OBS_RIGHT_QPOS.copy()
-        q[5] = VALIDATION_GRIPPER_HOME
-        return q
-    q = REAL_OBS_CENTER_QPOS.copy()
-    q[5] = VALIDATION_GRIPPER_HOME
-    return q
+        return REAL_OBS_RIGHT_QPOS.copy()
+    return REAL_OBS_CENTER_QPOS.copy()
 
 
-def _expected_next_qpos(current_q: np.ndarray, primitive_id: int) -> np.ndarray:
+def _expected_next_real_qpos(current_q: np.ndarray, primitive_id: int) -> np.ndarray:
     current_q = np.asarray(current_q, dtype=np.float32).copy()
     if primitive_id in (OBS_LEFT_ID, OBS_RIGHT_ID, OBS_CENTER_ID):
         return _expected_observe_pose(primitive_id)
     if primitive_id == PREALIGN_GRASP_ID:
-        q = REAL_PREALIGN_QPOS.copy()
-        q[5] = VALIDATION_GRIPPER_HOME
-        return q
+        return REAL_PREALIGN_QPOS.copy()
     if primitive_id == REOBSERVE_ID:
-        q = REAL_OBS_CENTER_QPOS.copy()
-        q[5] = VALIDATION_GRIPPER_HOME
-        return q
+        return REAL_OBS_CENTER_QPOS.copy()
     if primitive_id == APPROACH_COARSE_ID:
         return current_q + np.asarray([0.0, -0.12, -0.16, 0.08, 0.0, 0.0], dtype=np.float32)
     if primitive_id == APPROACH_FINE_ID:
@@ -183,27 +214,22 @@ def _expected_next_qpos(current_q: np.ndarray, primitive_id: int) -> np.ndarray:
     if primitive_id == RETREAT_ID:
         return current_q + np.asarray([0.0, 0.10, 0.14, -0.06, 0.0, 0.10], dtype=np.float32)
     if primitive_id == PREGRASP_SERVO_ID:
-        next_q = REAL_PREALIGN_QPOS.copy() + np.asarray([0.0, -0.04, -0.04, 0.02, 0.0, 0.0], dtype=np.float32)
-        next_q[5] = VALIDATION_GRIPPER_HOME
+        next_q = REAL_PREALIGN_QPOS.copy() + np.asarray([0.0, -0.04, -0.04, 0.02, 0.0, -0.04], dtype=np.float32)
         return next_q
     if primitive_id == GRASP_EXECUTE_ID:
         next_q = current_q + np.asarray([0.0, -0.08, -0.10, 0.05, 0.0, 0.0], dtype=np.float32)
-        next_q[5] = VALIDATION_GRIPPER_CLOSED
+        next_q[5] = REAL_GRIPPER_CLOSED_QPOS
         return next_q
     if primitive_id == LIFT_OBJECT_ID:
-        q = REAL_CARRY_QPOS.copy()
-        q[5] = VALIDATION_GRIPPER_CLOSED
-        return q
+        return REAL_CARRY_QPOS.copy()
     if primitive_id == TRANSPORT_TO_DROPZONE_ID:
-        q = REAL_DROPZONE_QPOS.copy()
-        q[5] = VALIDATION_GRIPPER_CLOSED
-        return q
+        return REAL_DROPZONE_QPOS.copy()
     if primitive_id == PLACE_OBJECT_ID:
         next_q = current_q + np.asarray([0.0, 0.08, -0.05, 0.0, 0.0, 0.0], dtype=np.float32)
-        next_q[5] = VALIDATION_GRIPPER_OPEN
+        next_q[5] = REAL_GRIPPER_OPEN_QPOS
         return next_q
     if primitive_id == ABORT_ID:
-        return VALIDATION_HOME_QPOS.copy()
+        return REAL_HOME_QPOS.copy()
     return current_q
 
 
@@ -302,8 +328,8 @@ def main() -> None:
         cv2.resizeWindow(REAL_WINDOW_NAME, 1320, 1020)
 
     obs = sim_env.reset(task_name=args.task)
-    expected_q = VALIDATION_HOME_QPOS.copy()
-    _apply_expected_qpos(sim_env, expected_q)
+    expected_real_q = REAL_HOME_QPOS.copy()
+    _apply_expected_qpos(sim_env, _map_real_to_sim_qpos(expected_real_q))
     if deploy_cfg.get("safety", {}).get("reset_before_episode", True):
         runner.robot.reset_pose()
         time.sleep(1.5)
@@ -328,8 +354,8 @@ def main() -> None:
             sim_before = sim_env.render_debug_view("overview_cam")
             real_before = runner.camera.read()
 
-            expected_next_q = _expected_next_qpos(expected_q, primitive_id)
-            _apply_expected_qpos(sim_env, expected_next_q)
+            expected_next_real_q = _expected_next_real_qpos(expected_real_q, primitive_id)
+            _apply_expected_qpos(sim_env, _map_real_to_sim_qpos(expected_next_real_q))
             sim_info = {
                 "task": args.task,
                 "success": 0,
@@ -378,7 +404,7 @@ def main() -> None:
             )
             cv2.imwrite(str(step_dir / "comparison.png"), dashboard)
 
-            expected_q = expected_next_q
+            expected_real_q = expected_next_real_q
             if not _await_next_step(args.auto_advance, args.disable_gui):
                 break
     finally:

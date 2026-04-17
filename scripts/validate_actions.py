@@ -12,8 +12,34 @@ import numpy as np
 
 from ttla.config import load_config
 from ttla.deployment import DeploymentRunner
+from ttla.deployment.primitives import (
+    REAL_CARRY_QPOS,
+    REAL_DROPZONE_QPOS,
+    REAL_HOME_QPOS,
+    REAL_OBS_CENTER_QPOS,
+    REAL_OBS_LEFT_QPOS,
+    REAL_OBS_RIGHT_QPOS,
+    REAL_PREALIGN_QPOS,
+)
 from ttla.sim import RoArmSimEnv
-from ttla.sim.skills import ABORT_ID, PRIMITIVE_NAMES, primitive_name
+from ttla.sim.skills import (
+    ABORT_ID,
+    APPROACH_COARSE_ID,
+    APPROACH_FINE_ID,
+    GRASP_EXECUTE_ID,
+    LIFT_OBJECT_ID,
+    OBS_CENTER_ID,
+    OBS_LEFT_ID,
+    OBS_RIGHT_ID,
+    PLACE_OBJECT_ID,
+    PREALIGN_GRASP_ID,
+    PREGRASP_SERVO_ID,
+    PRIMITIVE_NAMES,
+    REOBSERVE_ID,
+    RETREAT_ID,
+    TRANSPORT_TO_DROPZONE_ID,
+    primitive_name,
+)
 from ttla.utils.io import ensure_dir, write_json
 
 
@@ -95,6 +121,53 @@ def _update_overlay(handle, task_name: str, step_index: int, primitive_id: int, 
         ),
     ]
     handle.set_texts(texts)
+
+
+def _apply_expected_qpos(sim_env: RoArmSimEnv, qpos: np.ndarray) -> None:
+    sim_env.data.qpos[:6] = np.asarray(qpos, dtype=np.float64)
+    sim_env.data.ctrl[:6] = np.asarray(qpos, dtype=np.float64)
+    mujoco.mj_forward(sim_env.model, sim_env.data)
+
+
+def _expected_observe_pose(primitive_id: int) -> np.ndarray:
+    if primitive_id == OBS_LEFT_ID:
+        return REAL_OBS_LEFT_QPOS.copy()
+    if primitive_id == OBS_RIGHT_ID:
+        return REAL_OBS_RIGHT_QPOS.copy()
+    return REAL_OBS_CENTER_QPOS.copy()
+
+
+def _expected_next_qpos(current_q: np.ndarray, primitive_id: int) -> np.ndarray:
+    current_q = np.asarray(current_q, dtype=np.float32).copy()
+    if primitive_id in (OBS_LEFT_ID, OBS_RIGHT_ID, OBS_CENTER_ID):
+        return _expected_observe_pose(primitive_id)
+    if primitive_id == PREALIGN_GRASP_ID:
+        return REAL_PREALIGN_QPOS.copy()
+    if primitive_id == REOBSERVE_ID:
+        return REAL_OBS_CENTER_QPOS.copy()
+    if primitive_id == APPROACH_COARSE_ID:
+        return current_q + np.asarray([0.0, -0.12, -0.16, 0.08, 0.0, 0.0], dtype=np.float32)
+    if primitive_id == APPROACH_FINE_ID:
+        return current_q + np.asarray([0.0, -0.05, -0.07, 0.04, 0.0, 0.0], dtype=np.float32)
+    if primitive_id == RETREAT_ID:
+        return current_q + np.asarray([0.0, 0.10, 0.14, -0.06, 0.0, 0.10], dtype=np.float32)
+    if primitive_id == PREGRASP_SERVO_ID:
+        return REAL_PREALIGN_QPOS.copy() + np.asarray([0.0, -0.04, -0.04, 0.02, 0.0, -0.04], dtype=np.float32)
+    if primitive_id == GRASP_EXECUTE_ID:
+        next_q = current_q + np.asarray([0.0, -0.08, -0.10, 0.05, 0.0, 0.0], dtype=np.float32)
+        next_q[5] = 0.18
+        return next_q
+    if primitive_id == LIFT_OBJECT_ID:
+        return REAL_CARRY_QPOS.copy()
+    if primitive_id == TRANSPORT_TO_DROPZONE_ID:
+        return REAL_DROPZONE_QPOS.copy()
+    if primitive_id == PLACE_OBJECT_ID:
+        next_q = current_q + np.asarray([0.0, 0.08, -0.05, 0.0, 0.0, 0.0], dtype=np.float32)
+        next_q[5] = 1.05
+        return next_q
+    if primitive_id == ABORT_ID:
+        return REAL_HOME_QPOS.copy()
+    return current_q
 
 
 def _compose_real_dashboard(
@@ -192,6 +265,8 @@ def main() -> None:
         cv2.resizeWindow(REAL_WINDOW_NAME, 1320, 1020)
 
     obs = sim_env.reset(task_name=args.task)
+    expected_q = REAL_HOME_QPOS.copy()
+    _apply_expected_qpos(sim_env, expected_q)
     if deploy_cfg.get("safety", {}).get("reset_before_episode", True):
         runner.robot.reset_pose()
         time.sleep(1.5)
@@ -216,7 +291,15 @@ def main() -> None:
             sim_before = sim_env.render_debug_view("overview_cam")
             real_before = runner.camera.read()
 
-            next_obs, _reward, _done, sim_info = sim_env.step(primitive_id)
+            expected_next_q = _expected_next_qpos(expected_q, primitive_id)
+            _apply_expected_qpos(sim_env, expected_next_q)
+            sim_info = {
+                "task": args.task,
+                "success": 0,
+                "visibility": float(sim_env.visibility_score()),
+                "center_error": float(sim_env.center_error_px()),
+                "primitive_name": primitive_name(primitive_id),
+            }
             if viewer is not None:
                 _update_overlay(viewer, args.task, step_index, primitive_id, sim_info)
                 viewer.sync()
@@ -258,7 +341,7 @@ def main() -> None:
             )
             cv2.imwrite(str(step_dir / "comparison.png"), dashboard)
 
-            obs = next_obs
+            expected_q = expected_next_q
             if not _await_next_step(args.auto_advance, args.disable_gui):
                 break
     finally:

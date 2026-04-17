@@ -25,12 +25,15 @@ from ttla.sim.skills import (
     ABORT_ID,
     APPROACH_COARSE_ID,
     APPROACH_FINE_ID,
+    CARRY_QPOS,
     GRASP_EXECUTE_ID,
+    HOME_QPOS,
     LIFT_OBJECT_ID,
     OBS_CENTER_ID,
     OBS_LEFT_ID,
     OBS_RIGHT_ID,
     PLACE_OBJECT_ID,
+    PREALIGN_BASE_QPOS,
     PREALIGN_GRASP_ID,
     PREGRASP_SERVO_ID,
     PRIMITIVE_NAMES,
@@ -54,12 +57,12 @@ SUCCESS = (44, 142, 86)
 WARN = (204, 129, 54)
 
 
-# Validation-only gripper references. The real robot start pose is already
-# behaving reasonably, while the simulated reference looked visually inverted,
-# so we keep the arm poses but remap the gripper values used by the validator.
-VALIDATION_GRIPPER_OPEN = np.deg2rad(60.0).astype(np.float32)
-VALIDATION_GRIPPER_HOME = np.deg2rad(170.0).astype(np.float32)
-VALIDATION_GRIPPER_CLOSED = np.deg2rad(180.0).astype(np.float32)
+# Validation-only gripper references use the simulator's native qpos semantics.
+# In the MuJoCo model, larger values open the gripper wider and smaller values
+# close it, which is the opposite numeric direction from the real RoArm hand.
+VALIDATION_GRIPPER_OPEN = np.float32(PREALIGN_BASE_QPOS[5])
+VALIDATION_GRIPPER_HOME = np.float32(HOME_QPOS[5])
+VALIDATION_GRIPPER_CLOSED = np.float32(CARRY_QPOS[5])
 VALIDATION_HOME_QPOS = REAL_OBS_CENTER_QPOS.copy()
 VALIDATION_HOME_QPOS[0] = 0.0
 VALIDATION_HOME_QPOS[1] = 0.0

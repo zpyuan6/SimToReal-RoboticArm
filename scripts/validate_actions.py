@@ -57,27 +57,59 @@ SUCCESS = (44, 142, 86)
 WARN = (204, 129, 54)
 
 
-# Keep the arm joints on the real-aligned poses we already validated, and only
-# map the gripper into simulator qpos space. The simulator hand opens with a
-# larger qpos, while the real RoArm hand opens with a smaller angle.
-VALIDATION_SIM_GRIPPER_OPEN_QPOS = np.float32(2.3562)
-VALIDATION_SIM_GRIPPER_CLOSED_QPOS = np.float32(0.05)
+# Per-joint validation mapping. For base / shoulder / elbow / wrist / roll we
+# currently keep a conservative near-identity mapping because the real-arm
+# validation already matched the expected simulator poses reasonably well.
+# The gripper uses an explicit reversed linear map because the real RoArm hand
+# opens as its angle decreases, while the MuJoCo gripper opens as qpos grows.
+SIM_JOINT_LIMITS = np.asarray(
+    [
+        [-np.pi, np.pi],
+        [-np.pi / 2.0, np.pi / 2.0],
+        [-1.0, 2.95],
+        [-np.pi / 2.0, np.pi / 2.0],
+        [-np.pi, np.pi],
+        [0.0, 2.3562],
+    ],
+    dtype=np.float32,
+)
+
+REAL_JOINT_LIMITS = np.asarray(
+    [
+        [-np.pi, np.pi],
+        [-np.pi / 2.0, np.pi / 2.0],
+        [0.0, np.pi],
+        [-np.pi / 2.0, np.pi / 2.0],
+        [-np.pi, np.pi],
+        [float(REAL_GRIPPER_OPEN_QPOS), float(REAL_GRIPPER_CLOSED_QPOS)],
+    ],
+    dtype=np.float32,
+)
 
 
-def _map_real_gripper_to_sim(real_gripper_q: float) -> np.float32:
-    real_open = float(REAL_GRIPPER_OPEN_QPOS)
-    real_closed = float(REAL_GRIPPER_CLOSED_QPOS)
-    sim_open = float(VALIDATION_SIM_GRIPPER_OPEN_QPOS)
-    sim_closed = float(VALIDATION_SIM_GRIPPER_CLOSED_QPOS)
+def _map_joint_real_to_sim(joint_idx: int, value: float) -> np.float32:
+    # Joint indices 0-4 already use compatible semantics in this validator, so
+    # we retain them directly and only clamp to the MuJoCo actuator limits.
+    if joint_idx < 5:
+        lo, hi = SIM_JOINT_LIMITS[joint_idx]
+        return np.float32(np.clip(value, lo, hi))
+
+    real_open = float(REAL_JOINT_LIMITS[5, 0])
+    real_closed = float(REAL_JOINT_LIMITS[5, 1])
+    sim_open = float(SIM_JOINT_LIMITS[5, 1])
+    sim_closed = 0.0
     slope = (sim_closed - sim_open) / (real_closed - real_open)
     intercept = sim_open - slope * real_open
-    mapped = slope * float(real_gripper_q) + intercept
-    return np.float32(np.clip(mapped, 0.0, 2.3562))
+    mapped = slope * float(value) + intercept
+    lo, hi = SIM_JOINT_LIMITS[5]
+    return np.float32(np.clip(mapped, lo, hi))
 
 
 def _map_real_to_sim_qpos(real_q: np.ndarray) -> np.ndarray:
-    sim_q = np.asarray(real_q, dtype=np.float32).copy()
-    sim_q[5] = _map_real_gripper_to_sim(sim_q[5])
+    real_q = np.asarray(real_q, dtype=np.float32)
+    sim_q = real_q.copy()
+    for joint_idx in range(sim_q.shape[0]):
+        sim_q[joint_idx] = _map_joint_real_to_sim(joint_idx, sim_q[joint_idx])
     return sim_q
 
 

@@ -29,11 +29,15 @@ from ttla.sim.skills import (
     APPROACH_COARSE_ID,
     APPROACH_FINE_ID,
     GRASP_EXECUTE_ID,
+    HOME_QPOS as SIM_HOME_QPOS,
     LIFT_OBJECT_ID,
     OBS_CENTER_ID,
+    OBS_LEFT_QPOS as SIM_OBS_LEFT_QPOS,
     OBS_LEFT_ID,
+    OBS_RIGHT_QPOS as SIM_OBS_RIGHT_QPOS,
     OBS_RIGHT_ID,
     PLACE_OBJECT_ID,
+    PREALIGN_BASE_QPOS as SIM_PREALIGN_BASE_QPOS,
     PREALIGN_GRASP_ID,
     PREGRASP_SERVO_ID,
     PRIMITIVE_NAMES,
@@ -94,6 +98,41 @@ JOINT_MAPPING = {
     "wrist_pitch": {"index": 3, "scale": 1.0, "offset": 0.0},
     "wrist_roll": {"index": 4, "scale": 1.0, "offset": 0.0},
 }
+
+
+def _fit_two_point_map(real_a: float, sim_a: float, real_b: float, sim_b: float) -> tuple[float, float]:
+    real_delta = float(real_b) - float(real_a)
+    if abs(real_delta) < 1e-6:
+        return 1.0, 0.0
+    scale = (float(sim_b) - float(sim_a)) / real_delta
+    offset = float(sim_a) - scale * float(real_a)
+    return scale, offset
+
+
+JOINT_MAPPING["base"]["scale"], JOINT_MAPPING["base"]["offset"] = _fit_two_point_map(
+    REAL_OBS_LEFT_QPOS[0],
+    SIM_OBS_LEFT_QPOS[0],
+    REAL_OBS_RIGHT_QPOS[0],
+    SIM_OBS_RIGHT_QPOS[0],
+)
+JOINT_MAPPING["shoulder"]["scale"], JOINT_MAPPING["shoulder"]["offset"] = _fit_two_point_map(
+    REAL_HOME_QPOS[1],
+    SIM_HOME_QPOS[1],
+    REAL_PREALIGN_QPOS[1],
+    SIM_PREALIGN_BASE_QPOS[1],
+)
+JOINT_MAPPING["elbow"]["scale"], JOINT_MAPPING["elbow"]["offset"] = _fit_two_point_map(
+    REAL_HOME_QPOS[2],
+    SIM_HOME_QPOS[2],
+    REAL_PREALIGN_QPOS[2],
+    SIM_PREALIGN_BASE_QPOS[2],
+)
+JOINT_MAPPING["wrist_pitch"]["scale"], JOINT_MAPPING["wrist_pitch"]["offset"] = _fit_two_point_map(
+    REAL_HOME_QPOS[3],
+    SIM_HOME_QPOS[3],
+    REAL_PREALIGN_QPOS[3],
+    SIM_PREALIGN_BASE_QPOS[3],
+)
 
 def _map_joint_real_to_sim(joint_idx: int, value: float) -> np.float32:
     # Joint indices 0-4 already use compatible semantics in this validator, so

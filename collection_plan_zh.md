@@ -1,16 +1,26 @@
 # 真实数据采集计划
 
 本文档记录当前正式的真实数据采集方案。  
-本方案默认使用已经验证稳定的基线版本：
+本方案基于**当前已验证通过的最新代码基线**，适用于：
 
-- `stable-validation-v1`
+- L1 真实观察数据采集
+- L2 真实接近数据采集
+- L3 真实抓取搬运放置数据采集
 
-因此，**正式数据集应当从当前稳定节点重新开始采集**。  
-此前在基线尚未稳定前采到的数据，建议统一视为：
+这版基线已经人工确认通过：
+
+- L1 / L2 / L3 的真实与虚拟动作基本一致
+- `validate_actions.py` 的仿真侧会真正执行 primitive，而不是只摆姿态
+- L3 可以完成抓、抬、运、放
+- 放置前会下放，不再悬空释放
+- 抓住后 `11/12` 阶段不会提前松手
+- 左右观察角度已经调整到 `±30°`
+
+此前在更早基线下采到的数据，建议统一视为：
 
 - 历史数据
 - 调试数据
-- 标定前数据
+- 基线未稳定前数据
 
 默认不要直接混入新的正式数据集。
 
@@ -26,31 +36,17 @@
 - 背景
 - 其他外观环境因素
 
-这些因素如果在采集过程中自然发生变化，可以记录在笔记中，但不作为当前版本的主动设计变量。
-
-## 稳定基线
-
-本计划基于已经人工确认通过的稳定节点：
-
-- `stable-validation-v1`
-
-在这个稳定节点上，下面这些内容已经验证通过：
-
-- L1 动作验证
-- L2 动作验证
-- L3 分步动作验证
-- 真实 / 虚拟初始姿态对齐
-- 夹爪开合方向与幅度
-- 虚拟环境桌面对齐
+这些因素如果自然发生变化，可以记录在笔记中，但不作为当前版本的主动设计变量。
 
 ## 采集原则
 
-- 从当前稳定节点开始，重新建立正式数据集
+- 从当前已验证基线重新建立正式数据集
 - 每个批次内目标保持不动
 - 只在批次之间移动目标
 - 保留原始分辨率图像
 - `.npz` 继续作为主结构化数据格式
 - `frames/`、`meta.json`、`preview.mp4` 用于质检和调试
+- L3 不再只做小规模试采，而是纳入正式全量采集
 
 ## Primitive 速查
 
@@ -65,6 +61,11 @@
 
 - `2,0,1,2,3`
 
+说明：
+
+- 左右观察角度当前为 `±30°`
+- 这组序列用于采集稳定的多视角观察数据
+
 ### L2 / task-id 1
 
 - `4` = `prealign_grasp`
@@ -75,6 +76,10 @@
 推荐序列：
 
 - `2,3,4,5,6,7`
+
+说明：
+
+- `7` 仍保留在正式采集里，便于保留恢复动作样本
 
 ### L3 / task-id 2
 
@@ -89,9 +94,15 @@
 
 - `8,9,10,11,12,13`
 
+说明：
+
+- 当前基线下 `9/10` 已重新对齐，能更接近目标
+- `11/12` 会保持闭合，不会提前松手
+- `13` 会先下放再释放
+
 ## 目标摆放位置
 
-先定义一个中心基准位置，然后只围绕这个位置做少量平移：
+先定义一个中心基准位置，然后围绕这个位置做少量平移：
 
 - `P1`：中心
 - `P2`：左偏
@@ -112,24 +123,23 @@
 
 - 微调 / 适配
 - 离线测试
+- L3 正式分析与回放检查
 
 推荐的第一轮正式数据规模：
 
 - L1：5 个位置 x 10 次 repeat
 - L2：5 个位置 x 6 次 repeat
-- L3：3 个位置 x 3 次 repeat
+- L3：5 个位置 x 4 次 repeat
 
 粗略 transition 数量：
 
 - L1：`5 x 10 x 5 = 250`
 - L2：`5 x 6 x 6 = 180`
-- L3：`3 x 3 x 6 = 54`
+- L3：`5 x 4 x 6 = 120`
 
 总计约：
 
-- `484` 条 transition
-
-这是一版比较务实、又足够支持后续实验的正式数据规模。
+- `550` 条 transition
 
 ## 采集执行表
 
@@ -146,9 +156,11 @@
 | 2 | `v2_approach_p3_right` | 1 | 将目标放在中心右侧少量偏移的位置，并保证可安全接近。 | 是 | 开始前仅移动 1 次，相对中心右移 `3-5 cm`。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p3_right.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
 | 2 | `v2_approach_p4_front` | 1 | 将目标放在中心前侧少量偏移的位置，并保证可安全接近。 | 是 | 开始前仅移动 1 次，相对中心前移 `3-5 cm`。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p4_front.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
 | 2 | `v2_approach_p5_back` | 1 | 将目标放在中心后侧少量偏移的位置，并保证可安全接近。 | 是 | 开始前仅移动 1 次，相对中心后移 `3-5 cm`。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p5_back.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
-| 3 | `v3_pick_place_p1_center` | 2 | 将目标放在中心基准位置，并保证抓取到放置的完整路径安全。 | 否 | 3 次 repeat 全程保持该位置；若物体被移动，需在每次 repeat 后复位。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p1_center.npz --primitives 8,9,10,11,12,13 --repeats 3 --task-id 2` |
-| 3 | `v3_pick_place_p2_left` | 2 | 将目标放在中心左侧少量偏移的位置，并保证完整路径安全。 | 是 | 开始前仅移动 1 次，相对中心左移 `3-5 cm`；必要时每次 repeat 后复位目标。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p2_left.npz --primitives 8,9,10,11,12,13 --repeats 3 --task-id 2` |
-| 3 | `v3_pick_place_p3_right` | 2 | 将目标放在中心右侧少量偏移的位置，并保证完整路径安全。 | 是 | 开始前仅移动 1 次，相对中心右移 `3-5 cm`；必要时每次 repeat 后复位目标。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p3_right.npz --primitives 8,9,10,11,12,13 --repeats 3 --task-id 2` |
+| 3 | `v3_pick_place_p1_center` | 2 | 将目标放在中心基准位置，并保证抓取到放置的完整路径安全。 | 否 | 4 次 repeat 全程保持该位置；若物体被移动，需在每次 repeat 后复位。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p1_center.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
+| 3 | `v3_pick_place_p2_left` | 2 | 将目标放在中心左侧少量偏移的位置，并保证完整路径安全。 | 是 | 开始前仅移动 1 次，相对中心左移 `3-5 cm`；每次 repeat 后都要复位目标到同一起始姿态。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p2_left.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
+| 3 | `v3_pick_place_p3_right` | 2 | 将目标放在中心右侧少量偏移的位置，并保证完整路径安全。 | 是 | 开始前仅移动 1 次，相对中心右移 `3-5 cm`；每次 repeat 后都要复位目标到同一起始姿态。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p3_right.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
+| 3 | `v3_pick_place_p4_front` | 2 | 将目标放在中心前侧少量偏移的位置，并保证抓取和放置路径无遮挡。 | 是 | 开始前仅移动 1 次，相对中心前移 `3-5 cm`；每次 repeat 后都要复位目标到同一起始姿态。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p4_front.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
+| 3 | `v3_pick_place_p5_back` | 2 | 将目标放在中心后侧少量偏移的位置，并保证抓取和放置路径无遮挡。 | 是 | 开始前仅移动 1 次，相对中心后移 `3-5 cm`；每次 repeat 后都要复位目标到同一起始姿态。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p5_back.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
 
 ## 推荐执行顺序
 
@@ -166,6 +178,8 @@
 12. `v3_pick_place_p1_center`
 13. `v3_pick_place_p2_left`
 14. `v3_pick_place_p3_right`
+15. `v3_pick_place_p4_front`
+16. `v3_pick_place_p5_back`
 
 ## 推荐数据划分
 
@@ -175,7 +189,7 @@
 
 - L1 / L2 使用 `P1 / P2 / P3 / P4` 做微调 / 适配
 - L1 / L2 保留 `P5` 做离线测试
-- L3 可以完整保留一个位置，例如 `P3` 作为离线测试
+- L3 可以保留 `P5` 作为完整 hold-out 位置
 
 ### 按 repeat 划分
 
@@ -210,7 +224,7 @@ uv run python -c "import numpy as np; d=np.load('data/real/<batch_name>.npz'); p
 
 ## L3 额外说明
 
-- 如果目标在抓取 / 放置后发生了偏移，需要在每次 repeat 后手动复位到起始位置。
-- 放置区在同一批次内保持固定。
-- 采集 L3 时继续使用 `stable-validation-v1` 这版稳定基线。
-- 如果某个 L3 批次出现明显异常，应先暂停采集并重新验证 primitive，再继续。
+- L3 现在按正式全量方案采集，不再默认只做小规模试采。
+- 每个 repeat 后都要检查目标是否还在统一起始位置，如果被夹走、滚动或偏转，需手动复位。
+- 蓝色放置区在同一批次内保持固定，不建议边采边改位置。
+- 若某个 L3 批次连续出现异常，应先重新跑 `validate_actions.py` 对照验证，再继续采集。

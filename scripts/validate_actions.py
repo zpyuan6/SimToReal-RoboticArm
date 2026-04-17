@@ -57,9 +57,9 @@ WARN = (204, 129, 54)
 # Validation-only gripper references. The real robot start pose is already
 # behaving reasonably, while the simulated reference looked visually inverted,
 # so we keep the arm poses but remap the gripper values used by the validator.
-VALIDATION_GRIPPER_OPEN = np.deg2rad(10.0).astype(np.float32)
-VALIDATION_GRIPPER_HOME = np.deg2rad(120.0).astype(np.float32)
-VALIDATION_GRIPPER_CLOSED = np.deg2rad(170.0).astype(np.float32)
+VALIDATION_GRIPPER_OPEN = np.deg2rad(60.0).astype(np.float32)
+VALIDATION_GRIPPER_HOME = np.deg2rad(170.0).astype(np.float32)
+VALIDATION_GRIPPER_CLOSED = np.deg2rad(180.0).astype(np.float32)
 VALIDATION_HOME_QPOS = REAL_OBS_CENTER_QPOS.copy()
 VALIDATION_HOME_QPOS[0] = 0.0
 VALIDATION_HOME_QPOS[1] = 0.0
@@ -146,14 +146,14 @@ def _apply_expected_qpos(sim_env: RoArmSimEnv, qpos: np.ndarray) -> None:
 def _expected_observe_pose(primitive_id: int) -> np.ndarray:
     if primitive_id == OBS_LEFT_ID:
         q = REAL_OBS_LEFT_QPOS.copy()
-        q[5] = VALIDATION_GRIPPER_OPEN
+        q[5] = VALIDATION_GRIPPER_HOME
         return q
     if primitive_id == OBS_RIGHT_ID:
         q = REAL_OBS_RIGHT_QPOS.copy()
-        q[5] = VALIDATION_GRIPPER_OPEN
+        q[5] = VALIDATION_GRIPPER_HOME
         return q
     q = REAL_OBS_CENTER_QPOS.copy()
-    q[5] = VALIDATION_GRIPPER_OPEN
+    q[5] = VALIDATION_GRIPPER_HOME
     return q
 
 
@@ -163,11 +163,11 @@ def _expected_next_qpos(current_q: np.ndarray, primitive_id: int) -> np.ndarray:
         return _expected_observe_pose(primitive_id)
     if primitive_id == PREALIGN_GRASP_ID:
         q = REAL_PREALIGN_QPOS.copy()
-        q[5] = VALIDATION_GRIPPER_OPEN
+        q[5] = VALIDATION_GRIPPER_HOME
         return q
     if primitive_id == REOBSERVE_ID:
         q = REAL_OBS_CENTER_QPOS.copy()
-        q[5] = VALIDATION_GRIPPER_OPEN
+        q[5] = VALIDATION_GRIPPER_HOME
         return q
     if primitive_id == APPROACH_COARSE_ID:
         return current_q + np.asarray([0.0, -0.12, -0.16, 0.08, 0.0, 0.0], dtype=np.float32)
@@ -177,7 +177,7 @@ def _expected_next_qpos(current_q: np.ndarray, primitive_id: int) -> np.ndarray:
         return current_q + np.asarray([0.0, 0.10, 0.14, -0.06, 0.0, 0.10], dtype=np.float32)
     if primitive_id == PREGRASP_SERVO_ID:
         next_q = REAL_PREALIGN_QPOS.copy() + np.asarray([0.0, -0.04, -0.04, 0.02, 0.0, 0.0], dtype=np.float32)
-        next_q[5] = VALIDATION_GRIPPER_OPEN
+        next_q[5] = VALIDATION_GRIPPER_HOME
         return next_q
     if primitive_id == GRASP_EXECUTE_ID:
         next_q = current_q + np.asarray([0.0, -0.08, -0.10, 0.05, 0.0, 0.0], dtype=np.float32)

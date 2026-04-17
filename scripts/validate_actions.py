@@ -59,7 +59,6 @@ SUBTLE = (98, 108, 125)
 ACCENT = (54, 106, 255)
 SUCCESS = (44, 142, 86)
 WARN = (204, 129, 54)
-JOINT_NAMES = ("base", "shoulder", "elbow", "wrist_pitch", "wrist_roll", "gripper")
 
 
 # Per-joint validation mapping. For base / shoulder / elbow / wrist / roll we
@@ -329,8 +328,6 @@ def _save_step_artifacts(
     real_after: np.ndarray,
     sim_info: dict,
     real_info: dict,
-    expected_real_q: np.ndarray,
-    mapped_sim_q: np.ndarray,
 ) -> None:
     cv2.imwrite(str(step_dir / "sim_before.png"), sim_before)
     cv2.imwrite(str(step_dir / "sim_after.png"), sim_after)
@@ -343,8 +340,6 @@ def _save_step_artifacts(
             "primitive_name": primitive_name(primitive_id),
             "sim_info": sim_info,
             "real_info": real_info,
-            "expected_real_q": {name: float(value) for name, value in zip(JOINT_NAMES, expected_real_q)},
-            "mapped_sim_q": {name: float(value) for name, value in zip(JOINT_NAMES, mapped_sim_q)},
         },
     )
 
@@ -378,8 +373,7 @@ def main() -> None:
 
     obs = sim_env.reset(task_name=args.task)
     expected_real_q = REAL_HOME_QPOS.copy()
-    mapped_sim_q = _map_real_to_sim_qpos(expected_real_q)
-    _apply_expected_qpos(sim_env, mapped_sim_q)
+    _apply_expected_qpos(sim_env, _map_real_to_sim_qpos(expected_real_q))
     if deploy_cfg.get("safety", {}).get("reset_before_episode", True):
         runner.robot.reset_pose()
         time.sleep(1.5)
@@ -405,8 +399,7 @@ def main() -> None:
             real_before = runner.camera.read()
 
             expected_next_real_q = _expected_next_real_qpos(expected_real_q, primitive_id)
-            mapped_sim_q = _map_real_to_sim_qpos(expected_next_real_q)
-            _apply_expected_qpos(sim_env, mapped_sim_q)
+            _apply_expected_qpos(sim_env, _map_real_to_sim_qpos(expected_next_real_q))
             sim_info = {
                 "task": args.task,
                 "success": 0,
@@ -452,8 +445,6 @@ def main() -> None:
                     "primitive_name": sim_info.get("primitive_name", primitive_name(primitive_id)),
                 },
                 real_result.info,
-                expected_next_real_q,
-                mapped_sim_q,
             )
             cv2.imwrite(str(step_dir / "comparison.png"), dashboard)
 

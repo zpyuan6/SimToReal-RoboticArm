@@ -60,9 +60,13 @@ WARN = (204, 129, 54)
 # Validation-only gripper references use the simulator's native qpos semantics.
 # In the MuJoCo model, larger values open the gripper wider and smaller values
 # close it, which is the opposite numeric direction from the real RoArm hand.
-VALIDATION_GRIPPER_OPEN = np.float32(PREALIGN_BASE_QPOS[5])
-VALIDATION_GRIPPER_HOME = np.float32(HOME_QPOS[5])
-VALIDATION_GRIPPER_CLOSED = np.float32(CARRY_QPOS[5])
+# These values are tuned for visual alignment with the real robot:
+# - home: fingers nearly parallel
+# - closed: slightly tighter than home
+# - open: near the simulator's maximum visible opening
+VALIDATION_GRIPPER_OPEN = np.float32(1.45)
+VALIDATION_GRIPPER_HOME = np.float32(0.20)
+VALIDATION_GRIPPER_CLOSED = np.float32(0.05)
 VALIDATION_HOME_QPOS = REAL_OBS_CENTER_QPOS.copy()
 VALIDATION_HOME_QPOS[0] = 0.0
 VALIDATION_HOME_QPOS[1] = 0.0

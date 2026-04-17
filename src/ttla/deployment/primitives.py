@@ -46,6 +46,8 @@ REAL_CARRY_QPOS = np.deg2rad(np.asarray([0.0, -8.0, 96.0, -8.0, 0.0, 170.0], dty
 REAL_PREGRASP_ANCHOR_QPOS = np.deg2rad(np.asarray([0.0, 22.0, 112.0, -6.0, 0.0, 158.0], dtype=np.float32))
 REAL_DROPZONE_HOVER_QPOS = np.deg2rad(np.asarray([-20.0, 6.0, 139.0, -12.0, 0.0, 168.0], dtype=np.float32))
 REAL_PLACE_RELEASE_QPOS = np.deg2rad(np.asarray([-20.0, 10.0, 148.0, -8.0, 0.0, 168.0], dtype=np.float32))
+REAL_PREGRASP_SERVO_DELTA = np.deg2rad(np.asarray([0.0, -1.0, 2.0, 5.0, 0.0, -2.0], dtype=np.float32))
+REAL_GRASP_EXECUTE_DELTA = np.deg2rad(np.asarray([0.0, 8.0, 2.0, 12.0, 0.0, 0.0], dtype=np.float32))
 REAL_GRIPPER_HOME_QPOS = np.deg2rad(np.float32(170.0))
 REAL_GRIPPER_OPEN_QPOS = np.deg2rad(np.float32(60.0))
 REAL_GRIPPER_CLOSED_QPOS = np.deg2rad(np.float32(180.0))
@@ -98,11 +100,13 @@ class PrimitiveExecutor:
             # Move from coarse prealign into a lower anchor pose that better
             # matches the updated simulator grasp staging posture.
             self._goto(REAL_PREGRASP_ANCHOR_QPOS)
-            self._delta(np.asarray([0.0, -0.02, -0.03, 0.01, 0.0, -0.03], dtype=np.float32))
+            self._delta(REAL_PREGRASP_SERVO_DELTA)
             return PrimitiveResult(True, False, False, {"primitive_name": name, "mode": "servo_stub"})
         if primitive_id_value == GRASP_EXECUTE_ID:
-            # Descend from the pregrasp anchor before closing the gripper.
-            self._delta(np.asarray([0.0, -0.05, -0.08, 0.03, 0.0, 0.0], dtype=np.float32))
+            # Continue forward/down from the pregrasp anchor before closing the
+            # gripper. The updated simulator staging uses positive
+            # shoulder/elbow/wrist motion here, so mirror that on hardware.
+            self._delta(REAL_GRASP_EXECUTE_DELTA)
             self._set_gripper(REAL_GRIPPER_CLOSED_QPOS)
             return PrimitiveResult(True, False, False, {"primitive_name": name})
         if primitive_id_value == LIFT_OBJECT_ID:

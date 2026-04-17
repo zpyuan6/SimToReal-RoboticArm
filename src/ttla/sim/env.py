@@ -403,6 +403,7 @@ class RoArmSimEnv:
     def _carry_pose(self, destination: np.ndarray) -> np.ndarray:
         pose = CARRY_QPOS.copy()
         pose[0] = float(np.clip(np.arctan2(destination[1], max(destination[0], 1e-6)), -1.20, 1.20))
+        pose[5] = 0.05
         return pose
 
     def _pregrasp_anchor_pose(self, target_position: np.ndarray) -> np.ndarray:
@@ -425,7 +426,7 @@ class RoArmSimEnv:
         pose[1] = 0.10
         pose[2] = 2.425
         pose[3] = -0.20
-        pose[5] = 0.18
+        pose[5] = 0.05
         return pose
 
     def _execute_observe(self, primitive_id_value: int) -> None:

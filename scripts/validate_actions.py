@@ -60,7 +60,7 @@ WARN = (204, 129, 54)
 # Keep the arm joints on the real-aligned poses we already validated, and only
 # map the gripper into simulator qpos space. The simulator hand opens with a
 # larger qpos, while the real RoArm hand opens with a smaller angle.
-VALIDATION_SIM_GRIPPER_OPEN_QPOS = np.float32(1.50)
+VALIDATION_SIM_GRIPPER_OPEN_QPOS = np.float32(2.3562)
 VALIDATION_SIM_GRIPPER_CLOSED_QPOS = np.float32(0.05)
 
 
@@ -72,7 +72,7 @@ def _map_real_gripper_to_sim(real_gripper_q: float) -> np.float32:
     slope = (sim_closed - sim_open) / (real_closed - real_open)
     intercept = sim_open - slope * real_open
     mapped = slope * float(real_gripper_q) + intercept
-    return np.float32(np.clip(mapped, 0.0, 1.5))
+    return np.float32(np.clip(mapped, 0.0, 2.3562))
 
 
 def _map_real_to_sim_qpos(real_q: np.ndarray) -> np.ndarray:

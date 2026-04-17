@@ -125,7 +125,7 @@
                               diffuse="0.92 0.84 0.60" specular="0.08 0.08 0.08" attenuation="0.10 0 1.10" castshadow="false"/>
                           </body>
                           <body name="gripper_link" pos="0 0 0">
-                            <joint name="gripper_open" type="hinge" axis="0 0 1" range="0 85.9437"/>
+                            <joint name="gripper_open" type="hinge" axis="0 0 1" range="0 135"/>
                             <geom class="visual" mesh="gripper_link_mesh" material="black_plastic_mat"/>
                             <geom name="gripper_palm_geom" class="collision" type="box" size="0.014 0.032 0.010" pos="0 0 0.030"/>
                             <geom name="gripper_upper_finger_geom" class="collision" type="box" size="0.006 0.012 0.030" pos="0 0.018 0.056"/>
@@ -176,6 +176,6 @@
     <position name="a_elbow" joint="elbow_pitch" ctrlrange="-1.0 2.95"/>
     <position name="a_wrist_pitch" joint="wrist_pitch" ctrlrange="-1.5708 1.5708"/>
     <position name="a_wrist_roll" joint="wrist_roll" ctrlrange="-3.1416 3.1416"/>
-    <position name="a_gripper" joint="gripper_open" ctrlrange="0 1.5"/>
+    <position name="a_gripper" joint="gripper_open" ctrlrange="0 2.3562"/>
   </actuator>
 </mujoco>

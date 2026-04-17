@@ -86,12 +86,22 @@ REAL_JOINT_LIMITS = np.asarray(
     dtype=np.float32,
 )
 
+JOINT_MAPPING = {
+    "base": {"index": 0, "scale": 1.0, "offset": 0.0},
+    "shoulder": {"index": 1, "scale": 1.0, "offset": 0.0},
+    "elbow": {"index": 2, "scale": 1.0, "offset": 0.0},
+    "wrist_pitch": {"index": 3, "scale": 1.0, "offset": 0.0},
+    "wrist_roll": {"index": 4, "scale": 1.0, "offset": 0.0},
+}
+
 def _map_joint_real_to_sim(joint_idx: int, value: float) -> np.float32:
     # Joint indices 0-4 already use compatible semantics in this validator, so
     # we retain them directly and only clamp to the MuJoCo actuator limits.
     if joint_idx < 5:
+        mapping = next(cfg for cfg in JOINT_MAPPING.values() if cfg["index"] == joint_idx)
+        mapped = mapping["scale"] * float(value) + mapping["offset"]
         lo, hi = SIM_JOINT_LIMITS[joint_idx]
-        return np.float32(np.clip(value, lo, hi))
+        return np.float32(np.clip(mapped, lo, hi))
 
     real_open = float(REAL_JOINT_LIMITS[5, 0])
     real_closed = float(REAL_JOINT_LIMITS[5, 1])

@@ -69,8 +69,8 @@ OBS_CENTER_QPOS = np.asarray([0.0, 0.2094, 1.8850, 0.3142, 0.0, 0.4320], dtype=n
 OBS_LEFT_QPOS = np.asarray([0.35, 0.2094, 1.8850, 0.3142, 0.0, 0.4320], dtype=np.float32)
 OBS_RIGHT_QPOS = np.asarray([-0.35, 0.2094, 1.8850, 0.3142, 0.0, 0.4320], dtype=np.float32)
 PREALIGN_BASE_QPOS = np.asarray([0.0, 0.3142, 2.0595, 0.4538, 0.0, 0.5105], dtype=np.float32)
-CARRY_QPOS = np.asarray([0.0, -0.1396, 1.6755, -0.1396, 0.0, 0.05], dtype=np.float32)
-DROPZONE_QPOS = np.asarray([-0.5833, -0.1745, 1.7104, -0.1745, 0.0, 0.05], dtype=np.float32)
+CARRY_QPOS = np.asarray([0.0, -0.1396, 1.6755, -0.1396, 0.0, 0.0], dtype=np.float32)
+DROPZONE_QPOS = np.asarray([-0.5833, -0.1745, 1.7104, -0.1745, 0.0, 0.0], dtype=np.float32)
 
 
 LEVEL1_PRIMITIVES = (

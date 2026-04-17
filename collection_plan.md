@@ -1,88 +1,100 @@
 # Real Data Collection Plan
 
-This document records a practical real-world collection plan for the RoArm-M3
-setup when only the tabletop target position can be controlled reliably.
+This document records the formal real-world collection plan to use **after**
+the validator baseline was stabilized at git tag:
 
-The current plan focuses on:
+- `stable-validation-v1`
 
-- L1 / `task-id 0`: observation and verification
-- L2 / `task-id 1`: pre-alignment, approach, and recovery
+Use this plan for the new formal dataset. Earlier data collected before this
+stable baseline should be treated as:
 
-It intentionally does **not** depend on controlled lighting, controlled
-background swaps, or other environment factors that may be difficult to manage
-consistently during data collection.
+- legacy data
+- debugging data
+- pre-calibration data
+
+and should not be mixed into the new main dataset by default.
 
 ## Scope
 
-This plan is built around one controllable factor only:
+This plan assumes that the only environmental factor that can be controlled
+reliably is:
 
 - target position on the tabletop
 
-The target is moved between a small number of discrete placements. During each
-batch, the target stays fixed and multiple repeats are collected from that same
-placement.
+It does **not** assume stable control over:
 
-This plan currently covers:
+- lighting
+- background
+- other scene appearance factors
 
-- low-risk L1 observation data
-- medium-risk L2 approach data
-- target-position variation only
+Those factors may vary naturally and can be recorded in notes, but they are not
+used as deliberate collection variables in this version.
 
-This plan does not yet include L3 grasp / lift / transport / place as a main
-collection target.
+## Stable Baseline
 
-## Dataset Size Target
+This plan is based on the validated stable sim-to-real alignment at:
 
-If the goal is only smoke testing or very small few-shot experiments, a smaller
-dataset is enough.
+- `stable-validation-v1`
 
-However, if the goal is to support both:
+At this baseline, the following have been manually checked and accepted:
 
-- fine-tuning / adaptation
-- offline testing
+- L1 validation
+- L2 validation
+- L3 step-by-step validation
+- real / sim initial pose alignment
+- gripper open / close direction
+- tabletop alignment in the simulator
 
-then a larger first-round dataset is recommended.
+## Collection Principles
 
-The recommended target for this version is:
-
-- L1: 5 placements with `10` repeats each
-- L2: 5 placements with `6` repeats each
-
-Rough transition count:
-
-- L1: `5 x 10 x 5 = 250` transitions
-- L2: `5 x 6 x 6 = 180` transitions
-
-Total:
-
-- about `430` transitions
-
-This scale is more appropriate for:
-
-- first-round fine-tuning / adaptation
-- holding out part of the data for offline testing
-- train / offline-test splits by placement or repeat
+- Re-start formal collection from L1 using the stable baseline.
+- Keep target placement fixed within each batch.
+- Move the target only once between batches.
+- Preserve raw-resolution images.
+- Keep `.npz` as the main structured dataset format.
+- Keep `frames/`, `meta.json`, and `preview.mp4` for audit and debugging.
 
 ## Primitive Reference
 
-Low-risk observation primitives:
+### L1 / task-id 0
 
 - `2` = `obs_center`
 - `0` = `obs_left`
 - `1` = `obs_right`
 - `3` = `verify_target`
 
-Medium-risk approach primitives:
+Recommended L1 sequence:
+
+- `2,0,1,2,3`
+
+### L2 / task-id 1
 
 - `4` = `prealign_grasp`
 - `5` = `approach_coarse`
 - `6` = `approach_fine`
 - `7` = `retreat`
 
+Recommended L2 sequence:
+
+- `2,3,4,5,6,7`
+
+### L3 / task-id 2
+
+- `8` = `reobserve`
+- `9` = `pregrasp_servo`
+- `10` = `grasp_execute`
+- `11` = `lift_object`
+- `12` = `transport_to_dropzone`
+- `13` = `place_object`
+
+Recommended L3 sequence:
+
+- `8,9,10,11,12,13`
+
 ## Target Placements
 
-Define one center reference placement, then only move the target between these
-small offsets:
+Use one center reference placement and only move the target between these five
+placements:
 
 - `P1`: center
 - `P2`: left
@@ -90,34 +102,59 @@ small offsets:
 - `P4`: front
 - `P5`: back
 
-Recommended movement size:
+Recommended displacement:
 
-- left / right: about `3-5 cm`
-- front / back: about `3-5 cm`
+- left / right: `3-5 cm`
+- front / back: `3-5 cm`
 
-Keep object orientation unchanged unless it changes naturally while you move it.
-Do not intentionally add lighting or background variation in this version.
+Do not intentionally vary object orientation unless it shifts naturally while
+being moved.
+
+## Dataset Size Target
+
+This version aims to support both:
+
+- fine-tuning / adaptation
+- offline testing
+
+Recommended first formal dataset size:
+
+- L1: 5 placements x 10 repeats
+- L2: 5 placements x 6 repeats
+- L3: 3 placements x 3 repeats
+
+Approximate transition count:
+
+- L1: `5 x 10 x 5 = 250`
+- L2: `5 x 6 x 6 = 180`
+- L3: `3 x 3 x 6 = 54`
+
+Total:
+
+- about `484` transitions
+
+This gives a practical first full dataset while keeping L3 conservative.
 
 ## Collection Table
 
 | Stage | Batch Name | Task ID | How To Place The Object | Need To Move The Target? | How To Move The Target | Command To Run |
 |---|---|---:|---|---|---|---|
-| 0 | `smoke_verify` | 0 | Place the target at the center reference placement. Keep it clearly visible in the forearm camera view. | No | Do not move the target. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/smoke_verify.npz --primitives 2,3 --repeats 1 --task-id 0` |
-| 1 | `v1_verify_p1_center` | 0 | Place the target at the center reference placement. | No | Keep the target fixed for all 10 repeats. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v1_verify_p1_center.npz --primitives 2,0,1,2,3 --repeats 10 --task-id 0` |
-| 1 | `v1_verify_p2_left` | 0 | Start from the center reference and place the target slightly left while keeping it fully visible. | Yes | Move it once before the run, about `3-5 cm` left from center. Keep it fixed during the 10 repeats. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v1_verify_p2_left.npz --primitives 2,0,1,2,3 --repeats 10 --task-id 0` |
-| 1 | `v1_verify_p3_right` | 0 | Start from the center reference and place the target slightly right while keeping it fully visible. | Yes | Move it once before the run, about `3-5 cm` right from center. Keep it fixed during the 10 repeats. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v1_verify_p3_right.npz --primitives 2,0,1,2,3 --repeats 10 --task-id 0` |
-| 1 | `v1_verify_p4_front` | 0 | Start from the center reference and place the target slightly forward while keeping it visible and safe. | Yes | Move it once before the run, about `3-5 cm` in the front direction. Keep it fixed during the 10 repeats. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v1_verify_p4_front.npz --primitives 2,0,1,2,3 --repeats 10 --task-id 0` |
-| 1 | `v1_verify_p5_back` | 0 | Start from the center reference and place the target slightly backward while keeping it visible and safe. | Yes | Move it once before the run, about `3-5 cm` in the back direction. Keep it fixed during the 10 repeats. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v1_verify_p5_back.npz --primitives 2,0,1,2,3 --repeats 10 --task-id 0` |
-| 2 | `v2_approach_p1_center` | 1 | Place the target at the center reference placement, making sure the approach path is clear and safe. | No | Keep the target fixed for all 6 repeats. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p1_center.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
-| 2 | `v2_approach_p2_left` | 1 | Place the target slightly left from the center reference while keeping it in a safe approach region. | Yes | Move it once before the run, about `3-5 cm` left from center. Keep it fixed during the 6 repeats. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p2_left.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
-| 2 | `v2_approach_p3_right` | 1 | Place the target slightly right from the center reference while keeping it in a safe approach region. | Yes | Move it once before the run, about `3-5 cm` right from center. Keep it fixed during the 6 repeats. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p3_right.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
-| 2 | `v2_approach_p4_front` | 1 | Place the target slightly forward from the center reference while keeping it reachable and safe. | Yes | Move it once before the run, about `3-5 cm` in the front direction. Keep it fixed during the 6 repeats. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p4_front.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
-| 2 | `v2_approach_p5_back` | 1 | Place the target slightly backward from the center reference while keeping it reachable and safe. | Yes | Move it once before the run, about `3-5 cm` in the back direction. Keep it fixed during the 6 repeats. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p5_back.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
-| 3 | `v3_verify_offsets_dense` | 0 | Use any 3 of the 5 placements that were most stable in earlier runs. | Yes | Before each batch, move the target once to the chosen placement. Do not move it during the repeats. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_verify_offsets_dense.npz --primitives 2,0,1,2,3 --repeats 10 --task-id 0` |
+| 0 | `smoke_verify` | 0 | Place the target at the center reference placement and confirm it is clearly visible. | No | Do not move the target. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/smoke_verify.npz --primitives 2,3 --repeats 1 --task-id 0` |
+| 1 | `v1_verify_p1_center` | 0 | Place the target at the center reference placement. | No | Keep it fixed for all 10 repeats. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v1_verify_p1_center.npz --primitives 2,0,1,2,3 --repeats 10 --task-id 0` |
+| 1 | `v1_verify_p2_left` | 0 | Place the target slightly left of center while keeping it fully visible. | Yes | Move it once, about `3-5 cm` left from center, before the run. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v1_verify_p2_left.npz --primitives 2,0,1,2,3 --repeats 10 --task-id 0` |
+| 1 | `v1_verify_p3_right` | 0 | Place the target slightly right of center while keeping it fully visible. | Yes | Move it once, about `3-5 cm` right from center, before the run. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v1_verify_p3_right.npz --primitives 2,0,1,2,3 --repeats 10 --task-id 0` |
+| 1 | `v1_verify_p4_front` | 0 | Place the target slightly forward from center while keeping it visible. | Yes | Move it once, about `3-5 cm` toward the front direction, before the run. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v1_verify_p4_front.npz --primitives 2,0,1,2,3 --repeats 10 --task-id 0` |
+| 1 | `v1_verify_p5_back` | 0 | Place the target slightly backward from center while keeping it visible. | Yes | Move it once, about `3-5 cm` toward the back direction, before the run. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v1_verify_p5_back.npz --primitives 2,0,1,2,3 --repeats 10 --task-id 0` |
+| 2 | `v2_approach_p1_center` | 1 | Place the target at the center reference placement with a clear approach path. | No | Keep it fixed for all 6 repeats. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p1_center.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
+| 2 | `v2_approach_p2_left` | 1 | Place the target slightly left of center while keeping it in a safe approach region. | Yes | Move it once, about `3-5 cm` left from center, before the run. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p2_left.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
+| 2 | `v2_approach_p3_right` | 1 | Place the target slightly right of center while keeping it in a safe approach region. | Yes | Move it once, about `3-5 cm` right from center, before the run. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p3_right.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
+| 2 | `v2_approach_p4_front` | 1 | Place the target slightly forward from center while keeping it reachable and safe. | Yes | Move it once, about `3-5 cm` forward from center, before the run. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p4_front.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
+| 2 | `v2_approach_p5_back` | 1 | Place the target slightly backward from center while keeping it reachable and safe. | Yes | Move it once, about `3-5 cm` backward from center, before the run. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p5_back.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
+| 3 | `v3_pick_place_p1_center` | 2 | Place the target at the center reference placement and ensure the pick-and-place path is clear. | No | Keep it fixed for all 3 repeats. Re-seat the object if it is displaced after each repeat. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p1_center.npz --primitives 8,9,10,11,12,13 --repeats 3 --task-id 2` |
+| 3 | `v3_pick_place_p2_left` | 2 | Place the target slightly left of center while keeping the full pick-and-place path safe. | Yes | Move it once, about `3-5 cm` left from center, before the run. Re-seat after each repeat as needed. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p2_left.npz --primitives 8,9,10,11,12,13 --repeats 3 --task-id 2` |
+| 3 | `v3_pick_place_p3_right` | 2 | Place the target slightly right of center while keeping the full pick-and-place path safe. | Yes | Move it once, about `3-5 cm` right from center, before the run. Re-seat after each repeat as needed. | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p3_right.npz --primitives 8,9,10,11,12,13 --repeats 3 --task-id 2` |
 
 ## Recommended Execution Order
-
-To minimize manual work:
 
 1. `smoke_verify`
 2. `v1_verify_p1_center`
@@ -130,61 +167,34 @@ To minimize manual work:
 9. `v2_approach_p3_right`
 10. `v2_approach_p4_front`
 11. `v2_approach_p5_back`
-12. Optional dense follow-up batch:
-    - `v3_verify_offsets_dense`
-
-## Suggested Dataset Size
-
-This plan gives a more appropriate first complete dataset for both fine-tuning
-and offline testing:
-
-- L1: 5 placements x 10 repeats = 50 repeats
-- L2: 5 placements x 6 repeats = 30 repeats
-
-Total:
-
-- 80 repeats across L1 and L2
-
-Rough transition count:
-
-- L1: about `250` transitions
-- L2: about `180` transitions
-
-Total:
-
-- about `430` transitions
-
-This is more suitable for:
-
-- first-round fine-tuning / adaptation
-- offline testing
-- behavior analysis
+12. `v3_pick_place_p1_center`
+13. `v3_pick_place_p2_left`
+14. `v3_pick_place_p3_right`
 
 ## Recommended Data Split
 
-If the goal is to support both fine-tuning and offline testing, do not use the
-entire dataset for adaptation.
+Two simple split strategies are recommended.
 
-Two simple split strategies are recommended:
+### Split by placement
 
-1. Split by placement
+- Use `P1 / P2 / P3 / P4` for adaptation / fine-tuning
+- Hold out `P5` for offline testing in L1 / L2
+- In L3, hold out one full placement such as `P3`
 
-- `P1 / P2 / P3 / P4` for fine-tuning / adaptation
-- `P5` held out for offline testing
+### Split by repeat
 
-2. Split by repeat
+- Use earlier repeats for adaptation / fine-tuning
+- Hold out the last `2` repeats per placement for offline testing
+- For L3, hold out the last repeat per placement
 
-- earlier repeats for fine-tuning / adaptation
-- last `2` repeats from each placement held out for offline testing
-
-If you want a smaller distribution gap between train and test, the second
-strategy is usually better.
+If you want smaller train/test distribution shift, split-by-repeat is usually
+the safer choice.
 
 ## Post-Run Checklist
 
-After each batch:
+After every batch:
 
-1. Verify the saved `.npz`:
+1. Verify the `.npz` file:
 
 ```bash
 uv run python -c "import numpy as np; d=np.load('data/real/<batch_name>.npz'); print(d.files); print(d['images'].shape, d['states'].shape, d['primitive_ids'].shape)"
@@ -198,17 +208,17 @@ uv run python -c "import numpy as np; d=np.load('data/real/<batch_name>.npz'); p
 
 3. Confirm:
 
-- the target remains visible
-- the frames are sharp enough
+- the target stays visible
+- the image quality is acceptable
 - the primitive sequence looks correct
-- the output file names match the intended batch
+- the output file name matches the intended batch
 
-## Notes
+## L3 Notes
 
-- Preserve raw-resolution images during collection.
-- Keep the structured `.npz` files as the main training / analysis asset.
-- Use `frames/` and `preview.mp4` for audit and debugging.
-- If environment factors change naturally during collection, just record them in
-  notes; do not treat them as controlled variables in this version.
-- Treat L3 as a later, separate collection plan once the real robot grasp
-  pipeline is stable enough.
+- Re-seat the object between repeats if it is moved or dropped outside the
+  intended start pose.
+- Keep the drop zone clear and fixed during a batch.
+- Use the same validated hardware baseline as `stable-validation-v1`.
+- If any L3 batch shows unstable behavior, stop and re-validate primitives
+  before continuing collection.
+

@@ -325,7 +325,7 @@ def _save_step_artifacts(
     sim_info: dict,
     real_info: dict,
     expected_real_q: np.ndarray,
-    mapped_sim_q: np.ndarray,
+    sim_q: np.ndarray,
 ) -> None:
     cv2.imwrite(str(step_dir / "sim_before.png"), sim_before)
     cv2.imwrite(str(step_dir / "sim_after.png"), sim_after)
@@ -339,7 +339,7 @@ def _save_step_artifacts(
             "sim_info": sim_info,
             "real_info": real_info,
             "expected_real_q": {name: float(value) for name, value in zip(JOINT_NAMES, expected_real_q)},
-            "mapped_sim_q": {name: float(value) for name, value in zip(JOINT_NAMES, mapped_sim_q)},
+            "sim_q": {name: float(value) for name, value in zip(JOINT_NAMES, sim_q)},
         },
     )
 
@@ -373,8 +373,6 @@ def main() -> None:
 
     obs = sim_env.reset(task_name=args.task)
     expected_real_q = REAL_HOME_QPOS.copy()
-    mapped_sim_q = _map_real_to_sim_qpos(expected_real_q)
-    _apply_expected_qpos(sim_env, mapped_sim_q)
     if deploy_cfg.get("safety", {}).get("reset_before_episode", True):
         runner.robot.reset_pose()
         time.sleep(1.5)
@@ -400,14 +398,19 @@ def main() -> None:
             real_before = runner.camera.read()
 
             expected_next_real_q = _expected_next_real_qpos(expected_real_q, primitive_id)
-            mapped_sim_q = _map_real_to_sim_qpos(expected_next_real_q)
-            _apply_expected_qpos(sim_env, mapped_sim_q)
+            _, sim_reward, sim_done, sim_info_raw = sim_env.step(primitive_id)
+            sim_after_q = sim_env.data.qpos[:6].copy()
             sim_info = {
                 "task": args.task,
-                "success": 0,
-                "visibility": float(sim_env.visibility_score()),
-                "center_error": float(sim_env.center_error_px()),
-                "primitive_name": primitive_name(primitive_id),
+                "success": int(sim_info_raw.get("success", 0)),
+                "visibility": float(sim_info_raw.get("visibility", sim_env.visibility_score())),
+                "center_error": float(sim_info_raw.get("center_error", sim_env.center_error_px())),
+                "primitive_name": sim_info_raw.get("primitive_name", primitive_name(primitive_id)),
+                "grasped": int(sim_info_raw.get("grasped", 0)),
+                "lifted": int(sim_info_raw.get("lifted", 0)),
+                "placed": int(sim_info_raw.get("placed", 0)),
+                "reward": float(sim_reward),
+                "done": bool(sim_done),
             }
             if viewer is not None:
                 _update_overlay(viewer, args.task, step_index, primitive_id, sim_info)
@@ -445,10 +448,15 @@ def main() -> None:
                     "visibility": float(sim_info.get("visibility", 0.0)),
                     "center_error": float(sim_info.get("center_error", 0.0)),
                     "primitive_name": sim_info.get("primitive_name", primitive_name(primitive_id)),
+                    "grasped": int(sim_info.get("grasped", 0)),
+                    "lifted": int(sim_info.get("lifted", 0)),
+                    "placed": int(sim_info.get("placed", 0)),
+                    "reward": float(sim_info.get("reward", 0.0)),
+                    "done": bool(sim_info.get("done", False)),
                 },
                 real_result.info,
                 expected_next_real_q,
-                mapped_sim_q,
+                sim_after_q,
             )
             cv2.imwrite(str(step_dir / "comparison.png"), dashboard)
 

@@ -29,18 +29,11 @@ from ttla.sim.skills import (
     APPROACH_COARSE_ID,
     APPROACH_FINE_ID,
     GRASP_EXECUTE_ID,
-    HOME_QPOS as SIM_HOME_QPOS,
     LIFT_OBJECT_ID,
     OBS_CENTER_ID,
-    OBS_CENTER_QPOS as SIM_OBS_CENTER_QPOS,
     OBS_LEFT_ID,
-    OBS_LEFT_QPOS as SIM_OBS_LEFT_QPOS,
     OBS_RIGHT_ID,
-    OBS_RIGHT_QPOS as SIM_OBS_RIGHT_QPOS,
     PLACE_OBJECT_ID,
-    CARRY_QPOS as SIM_CARRY_QPOS,
-    DROPZONE_QPOS as SIM_DROPZONE_QPOS,
-    PREALIGN_BASE_QPOS as SIM_PREALIGN_BASE_QPOS,
     PREALIGN_GRASP_ID,
     PREGRASP_SERVO_ID,
     PRIMITIVE_NAMES,
@@ -93,52 +86,9 @@ REAL_JOINT_LIMITS = np.asarray(
     dtype=np.float32,
 )
 
-ELBOW_REAL_REFS = np.asarray(
-    [
-        REAL_HOME_QPOS[2],
-        REAL_OBS_CENTER_QPOS[2],
-        REAL_OBS_LEFT_QPOS[2],
-        REAL_OBS_RIGHT_QPOS[2],
-        REAL_PREALIGN_QPOS[2],
-        REAL_CARRY_QPOS[2],
-        REAL_DROPZONE_QPOS[2],
-    ],
-    dtype=np.float32,
-)
-ELBOW_SIM_REFS = np.asarray(
-    [
-        SIM_HOME_QPOS[2],
-        SIM_OBS_CENTER_QPOS[2],
-        SIM_OBS_LEFT_QPOS[2],
-        SIM_OBS_RIGHT_QPOS[2],
-        SIM_PREALIGN_BASE_QPOS[2],
-        SIM_CARRY_QPOS[2],
-        SIM_DROPZONE_QPOS[2],
-    ],
-    dtype=np.float32,
-)
-
-
-def _fit_scalar_affine(real_refs: np.ndarray, sim_refs: np.ndarray) -> tuple[np.float32, np.float32]:
-    x = np.asarray(real_refs, dtype=np.float64)
-    y = np.asarray(sim_refs, dtype=np.float64)
-    design = np.stack([x, np.ones_like(x)], axis=1)
-    solution, *_ = np.linalg.lstsq(design, y, rcond=None)
-    return np.float32(solution[0]), np.float32(solution[1])
-
-
-ELBOW_TO_SIM_SLOPE, ELBOW_TO_SIM_INTERCEPT = _fit_scalar_affine(ELBOW_REAL_REFS, ELBOW_SIM_REFS)
-
-
 def _map_joint_real_to_sim(joint_idx: int, value: float) -> np.float32:
     # Joint indices 0-4 already use compatible semantics in this validator, so
-    # we retain them directly and only clamp to the MuJoCo actuator limits,
-    # except elbow which benefits from an explicit affine fit.
-    if joint_idx == 2:
-        mapped = ELBOW_TO_SIM_SLOPE * np.float32(value) + ELBOW_TO_SIM_INTERCEPT
-        lo, hi = SIM_JOINT_LIMITS[joint_idx]
-        return np.float32(np.clip(mapped, lo, hi))
-
+    # we retain them directly and only clamp to the MuJoCo actuator limits.
     if joint_idx < 5:
         lo, hi = SIM_JOINT_LIMITS[joint_idx]
         return np.float32(np.clip(value, lo, hi))

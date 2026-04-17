@@ -57,15 +57,16 @@ WARN = (204, 129, 54)
 # Validation-only gripper references. The real robot start pose is already
 # behaving reasonably, while the simulated reference looked visually inverted,
 # so we keep the arm poses but remap the gripper values used by the validator.
-VALIDATION_GRIPPER_OPEN = np.deg2rad(170.0).astype(np.float32)
-VALIDATION_GRIPPER_CLOSED = np.deg2rad(60.0).astype(np.float32)
+VALIDATION_GRIPPER_OPEN = np.deg2rad(10.0).astype(np.float32)
+VALIDATION_GRIPPER_HOME = np.deg2rad(120.0).astype(np.float32)
+VALIDATION_GRIPPER_CLOSED = np.deg2rad(170.0).astype(np.float32)
 VALIDATION_HOME_QPOS = REAL_OBS_CENTER_QPOS.copy()
 VALIDATION_HOME_QPOS[0] = 0.0
 VALIDATION_HOME_QPOS[1] = 0.0
 VALIDATION_HOME_QPOS[2] = np.deg2rad(90.0).astype(np.float32)
 VALIDATION_HOME_QPOS[3] = 0.0
 VALIDATION_HOME_QPOS[4] = 0.0
-VALIDATION_HOME_QPOS[5] = VALIDATION_GRIPPER_OPEN
+VALIDATION_HOME_QPOS[5] = VALIDATION_GRIPPER_HOME
 
 
 def _parse_args() -> argparse.Namespace:

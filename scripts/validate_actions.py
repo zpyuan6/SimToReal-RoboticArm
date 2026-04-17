@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
+import mujoco
+import mujoco.viewer
 import numpy as np
 
 from ttla.config import load_config
@@ -15,7 +17,7 @@ from ttla.sim.skills import ABORT_ID, PRIMITIVE_NAMES, primitive_name
 from ttla.utils.io import ensure_dir, write_json
 
 
-WINDOW_NAME = "TTLA Action Validator"
+REAL_WINDOW_NAME = "TTLA Real Action Comparison"
 WINDOW_FLAGS = cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_EXPANDED
 BG = (242, 244, 248)
 CARD = (251, 252, 254)
@@ -37,6 +39,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--step-delay", type=float, default=0.5, help="Pause after a real action before reading the after-frame.")
     parser.add_argument("--auto-advance", action="store_true", help="Advance automatically instead of waiting for a key between steps.")
+    parser.add_argument("--hide-left-ui", action="store_true")
+    parser.add_argument("--hide-right-ui", action="store_true")
     parser.add_argument("--disable-gui", action="store_true")
     return parser.parse_args()
 
@@ -62,46 +66,76 @@ def _badge(canvas: np.ndarray, text: str, origin: tuple[int, int], color: tuple[
     _put(canvas, text, (x + 10, y + 20), 0.48, (255, 255, 255), 1)
 
 
-def _compose_dashboard(
+def _configure_camera(handle) -> None:
+    with handle.lock():
+        handle.cam.azimuth = 132.0
+        handle.cam.elevation = -24.0
+        handle.cam.distance = 0.95
+        handle.cam.lookat[:] = np.asarray([0.26, 0.0, 0.12], dtype=np.float64)
+
+
+def _update_overlay(handle, task_name: str, step_index: int, primitive_id: int, sim_info: dict) -> None:
+    texts = [
+        (
+            mujoco.mjtFontScale.mjFONTSCALE_150,
+            mujoco.mjtGridPos.mjGRID_TOPLEFT,
+            "Sim Action Validator",
+            (
+                f"task={task_name} | step={step_index} | primitive={primitive_name(primitive_id)}\n"
+                f"success={int(sim_info.get('success', 0))} "
+                f"vis={float(sim_info.get('visibility', 0.0)):.3f} "
+                f"center={float(sim_info.get('center_error', 0.0)):.1f}px"
+            ),
+        ),
+        (
+            mujoco.mjtFontScale.mjFONTSCALE_150,
+            mujoco.mjtGridPos.mjGRID_TOPRIGHT,
+            "controls",
+            "Free camera works here.\nPress N / Space / Enter in the OpenCV window to advance.\nPress Q / Esc in the OpenCV window to stop.",
+        ),
+    ]
+    handle.set_texts(texts)
+
+
+def _compose_real_dashboard(
     task_name: str,
     step_index: int,
     primitive_id: int,
-    sim_before: np.ndarray,
-    sim_after: np.ndarray,
     real_before: np.ndarray,
     real_after: np.ndarray,
-    sim_info: dict,
+    sim_before: np.ndarray,
+    sim_after: np.ndarray,
     real_info: dict,
 ) -> np.ndarray:
     canvas = np.full((980, 1280, 3), BG, dtype=np.uint8)
-    _put(canvas, "TTLA Sim-to-Real Action Validator", (28, 34), 0.92, TEXT, 2)
-    _put(canvas, "Compare expected simulated motion and real robot execution for the same primitive.", (30, 60), 0.48, SUBTLE, 1)
-    _badge(canvas, f"STEP {step_index}", (988, 22), ACCENT)
-    _badge(canvas, primitive_name(primitive_id), (1098, 22), SUCCESS if primitive_id != ABORT_ID else WARN)
+    _put(canvas, "TTLA Real Action Comparison", (28, 34), 0.92, TEXT, 2)
+    _put(canvas, "Native MuJoCo viewer shows the simulated expected motion in a separate window.", (30, 60), 0.48, SUBTLE, 1)
+    _badge(canvas, f"STEP {step_index}", (980, 22), ACCENT)
+    _badge(canvas, primitive_name(primitive_id), (1090, 22), SUCCESS if primitive_id != ABORT_ID else WARN)
 
-    _card(canvas, (24, 84), (620, 462), "Sim Before", f"Task: {task_name}")
-    _card(canvas, (660, 84), (1256, 462), "Sim After", f"Primitive: {primitive_name(primitive_id)}")
-    _card(canvas, (24, 500), (620, 878), "Real Before")
-    _card(canvas, (660, 500), (1256, 878), "Real After")
-    _card(canvas, (24, 900), (1256, 956), "Summary", None)
+    _card(canvas, (24, 84), (620, 462), "Real Before", f"Task: {task_name}")
+    _card(canvas, (660, 84), (1256, 462), "Real After", f"Primitive: {primitive_name(primitive_id)}")
+    _card(canvas, (24, 500), (620, 878), "Sim Before Snapshot")
+    _card(canvas, (660, 500), (1256, 878), "Sim After Snapshot")
+    _card(canvas, (24, 900), (1256, 956), "Controls", None)
 
-    sim_before_view = cv2.resize(sim_before, (560, 280), interpolation=cv2.INTER_CUBIC)
-    sim_after_view = cv2.resize(sim_after, (560, 280), interpolation=cv2.INTER_CUBIC)
-    real_before_view = cv2.resize(real_before, (560, 280), interpolation=cv2.INTER_CUBIC)
-    real_after_view = cv2.resize(real_after, (560, 280), interpolation=cv2.INTER_CUBIC)
-    canvas[150:430, 44:604] = sim_before_view
-    canvas[150:430, 680:1240] = sim_after_view
-    canvas[566:846, 44:604] = real_before_view
-    canvas[566:846, 680:1240] = real_after_view
+    real_before_view = cv2.resize(real_before, (560, 280), interpolation=cv2.INTER_AREA)
+    real_after_view = cv2.resize(real_after, (560, 280), interpolation=cv2.INTER_AREA)
+    sim_before_view = cv2.resize(sim_before, (560, 280), interpolation=cv2.INTER_AREA)
+    sim_after_view = cv2.resize(sim_after, (560, 280), interpolation=cv2.INTER_AREA)
+    canvas[150:430, 44:604] = real_before_view
+    canvas[150:430, 680:1240] = real_after_view
+    canvas[566:846, 44:604] = sim_before_view
+    canvas[566:846, 680:1240] = sim_after_view
 
-    sim_summary = (
-        f"sim success={int(sim_info.get('success', 0))} "
-        f"vis={float(sim_info.get('visibility', 0.0)):.3f} "
-        f"center={float(sim_info.get('center_error', 0.0)):.1f}px"
+    controls_text = (
+        "N / Space / Enter: next step    "
+        "Q / Esc: quit    "
+        "Use the MuJoCo viewer window to orbit / zoom / pan the simulated scene."
     )
     real_summary = real_info.get("primitive_name", primitive_name(primitive_id))
-    _put(canvas, f"Sim: {sim_summary}", (44, 934), 0.5, SUBTLE, 1)
-    _put(canvas, f"Real: {real_summary}", (640, 934), 0.5, SUBTLE, 1)
+    _put(canvas, f"Real info: {real_summary}", (40, 930), 0.5, SUBTLE, 1)
+    _put(canvas, controls_text, (420, 930), 0.46, SUBTLE, 1)
     return canvas
 
 
@@ -154,40 +188,56 @@ def main() -> None:
     session_dir = ensure_dir(Path(args.save_dir) / f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 
     if not args.disable_gui:
-        cv2.namedWindow(WINDOW_NAME, WINDOW_FLAGS)
-        cv2.resizeWindow(WINDOW_NAME, 1320, 1020)
+        cv2.namedWindow(REAL_WINDOW_NAME, WINDOW_FLAGS)
+        cv2.resizeWindow(REAL_WINDOW_NAME, 1320, 1020)
 
     obs = sim_env.reset(task_name=args.task)
     if deploy_cfg.get("safety", {}).get("reset_before_episode", True):
         runner.robot.reset_pose()
         time.sleep(1.5)
 
+    viewer = None
+    if not args.disable_gui:
+        viewer = mujoco.viewer.launch_passive(
+            sim_env.model,
+            sim_env.data,
+            show_left_ui=not args.hide_left_ui,
+            show_right_ui=not args.hide_right_ui,
+        )
+        _configure_camera(viewer)
+
     try:
         for step_index, primitive_id in enumerate(primitive_ids, start=1):
+            if viewer is not None and not viewer.is_running():
+                break
+
             step_dir = ensure_dir(session_dir / f"step_{step_index:03d}_{primitive_name(primitive_id)}")
 
-            sim_before = obs["image"].copy()
+            sim_before = sim_env.render_debug_view("overview_cam")
             real_before = runner.camera.read()
 
             next_obs, _reward, _done, sim_info = sim_env.step(primitive_id)
+            if viewer is not None:
+                _update_overlay(viewer, args.task, step_index, primitive_id, sim_info)
+                viewer.sync()
+
             real_result = runner.executor.run(primitive_id)
             time.sleep(max(args.step_delay, 0.0))
             real_after = runner.camera.read()
-            sim_after = next_obs["image"].copy()
+            sim_after = sim_env.render_debug_view("overview_cam")
 
-            dashboard = _compose_dashboard(
+            dashboard = _compose_real_dashboard(
                 args.task,
                 step_index,
                 primitive_id,
-                sim_before,
-                sim_after,
                 real_before,
                 real_after,
-                sim_info,
+                sim_before,
+                sim_after,
                 real_result.info,
             )
             if not args.disable_gui:
-                cv2.imshow(WINDOW_NAME, dashboard)
+                cv2.imshow(REAL_WINDOW_NAME, dashboard)
                 cv2.waitKey(1)
 
             _save_step_artifacts(
@@ -220,6 +270,8 @@ def main() -> None:
                 "primitive_names": [PRIMITIVE_NAMES[idx] for idx in primitive_ids],
             },
         )
+        if viewer is not None:
+            viewer.close()
         runner.close()
         sim_env.close()
         cv2.destroyAllWindows()

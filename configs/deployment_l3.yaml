@@ -13,7 +13,7 @@ runtime:
   max_steps: 12
   probe_steps: 4
   log_dir: data/raw/real_eval
-  primitive_sleep_s: 1.8
+  primitive_sleep_s: 4.0
 
 safety:
   max_joint_step_deg: 5.0

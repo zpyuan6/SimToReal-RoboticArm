@@ -99,6 +99,7 @@
 - 当前基线下 `9/10` 已重新对齐，能更接近目标
 - `11/12` 会保持闭合，不会提前松手
 - `13` 会先下放再释放
+- 正式 L3 采集默认使用 `configs/deployment_l3.yaml`，给每个 primitive 更长的等待时间
 
 ## 目标摆放位置
 
@@ -156,11 +157,11 @@
 | 2 | `v2_approach_p3_right` | 1 | 将目标放在中心右侧少量偏移的位置，并保证可安全接近。 | 是 | 开始前仅移动 1 次，相对中心右移 `3-5 cm`。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p3_right.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
 | 2 | `v2_approach_p4_front` | 1 | 将目标放在中心前侧少量偏移的位置，并保证可安全接近。 | 是 | 开始前仅移动 1 次，相对中心前移 `3-5 cm`。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p4_front.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
 | 2 | `v2_approach_p5_back` | 1 | 将目标放在中心后侧少量偏移的位置，并保证可安全接近。 | 是 | 开始前仅移动 1 次，相对中心后移 `3-5 cm`。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v2_approach_p5_back.npz --primitives 2,3,4,5,6,7 --repeats 6 --task-id 1` |
-| 3 | `v3_pick_place_p1_center` | 2 | 将目标放在中心基准位置，并保证抓取到放置的完整路径安全。 | 否 | 4 次 repeat 全程保持该位置；若物体被移动，需在每次 repeat 后复位。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p1_center.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
-| 3 | `v3_pick_place_p2_left` | 2 | 将目标放在中心左侧少量偏移的位置，并保证完整路径安全。 | 是 | 开始前仅移动 1 次，相对中心左移 `3-5 cm`；每次 repeat 后都要复位目标到同一起始姿态。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p2_left.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
-| 3 | `v3_pick_place_p3_right` | 2 | 将目标放在中心右侧少量偏移的位置，并保证完整路径安全。 | 是 | 开始前仅移动 1 次，相对中心右移 `3-5 cm`；每次 repeat 后都要复位目标到同一起始姿态。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p3_right.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
-| 3 | `v3_pick_place_p4_front` | 2 | 将目标放在中心前侧少量偏移的位置，并保证抓取和放置路径无遮挡。 | 是 | 开始前仅移动 1 次，相对中心前移 `3-5 cm`；每次 repeat 后都要复位目标到同一起始姿态。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p4_front.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
-| 3 | `v3_pick_place_p5_back` | 2 | 将目标放在中心后侧少量偏移的位置，并保证抓取和放置路径无遮挡。 | 是 | 开始前仅移动 1 次，相对中心后移 `3-5 cm`；每次 repeat 后都要复位目标到同一起始姿态。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment.yaml --output data/real/v3_pick_place_p5_back.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
+| 3 | `v3_pick_place_p1_center` | 2 | 将目标放在中心基准位置，并保证抓取到放置的完整路径安全。 | 否 | 4 次 repeat 全程保持该位置；若物体被移动，需在每次 repeat 后复位。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment_l3.yaml --output data/real/v3_pick_place_p1_center.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
+| 3 | `v3_pick_place_p2_left` | 2 | 将目标放在中心左侧少量偏移的位置，并保证完整路径安全。 | 是 | 开始前仅移动 1 次，相对中心左移 `3-5 cm`；每次 repeat 后都要复位目标到同一起始姿态。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment_l3.yaml --output data/real/v3_pick_place_p2_left.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
+| 3 | `v3_pick_place_p3_right` | 2 | 将目标放在中心右侧少量偏移的位置，并保证完整路径安全。 | 是 | 开始前仅移动 1 次，相对中心右移 `3-5 cm`；每次 repeat 后都要复位目标到同一起始姿态。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment_l3.yaml --output data/real/v3_pick_place_p3_right.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
+| 3 | `v3_pick_place_p4_front` | 2 | 将目标放在中心前侧少量偏移的位置，并保证抓取和放置路径无遮挡。 | 是 | 开始前仅移动 1 次，相对中心前移 `3-5 cm`；每次 repeat 后都要复位目标到同一起始姿态。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment_l3.yaml --output data/real/v3_pick_place_p4_front.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
+| 3 | `v3_pick_place_p5_back` | 2 | 将目标放在中心后侧少量偏移的位置，并保证抓取和放置路径无遮挡。 | 是 | 开始前仅移动 1 次，相对中心后移 `3-5 cm`；每次 repeat 后都要复位目标到同一起始姿态。 | `uv run python scripts/collect_real_calibration.py --config configs/base.yaml --deploy-config configs/deployment_l3.yaml --output data/real/v3_pick_place_p5_back.npz --primitives 8,9,10,11,12,13 --repeats 4 --task-id 2` |
 
 ## 推荐执行顺序
 
@@ -225,6 +226,9 @@ uv run python -c "import numpy as np; d=np.load('data/real/<batch_name>.npz'); p
 ## L3 额外说明
 
 - L3 现在按正式全量方案采集，不再默认只做小规模试采。
+- L3 批次默认使用 `configs/deployment_l3.yaml`，不要和 L1/L2 共用同一份部署节奏配置。
+- `configs/deployment_l3.yaml` 当前默认 `runtime.primitive_sleep_s: 4.0`，用于给抓取、抬升、搬运和放置留出足够完成时间。
+- L3 采集在每个 repeat 开始前会先执行硬件复位（`safety.reset_before_episode: true`），因此第一步 primitive 是从标准起始位开始，而不是从上一次 repeat 的末态直接继续。
 - 每个 repeat 后都要检查目标是否还在统一起始位置，如果被夹走、滚动或偏转，需手动复位。
 - 蓝色放置区在同一批次内保持固定，不建议边采边改位置。
 - 若某个 L3 批次连续出现异常，应先重新跑 `validate_actions.py` 对照验证，再继续采集。

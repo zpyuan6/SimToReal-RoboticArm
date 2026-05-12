@@ -9,25 +9,39 @@ from torch import nn
 
 from ..sim.skills import (
     ABORT_ID,
+    ABORT_FAMILY_ID,
     APPROACH_COARSE_ID,
+    APPROACH_FAMILY_ID,
     APPROACH_FINE_ID,
+    CONFIRM_FAMILY_ID,
     GRASP_EXECUTE_ID,
+    GRASP_FAMILY_ID,
     HOLD_POSITION_ID,
+    HOLD_FAMILY_ID,
     LIFT_OBJECT_ID,
+    LIFT_FAMILY_ID,
     OBS_CENTER_ID,
     OBS_LEFT_ID,
     OBS_RIGHT_ID,
+    OBSERVE_FAMILY_ID,
     PLACE_OBJECT_ID,
+    PLACE_FAMILY_ID,
     PREALIGN_GRASP_ID,
     PREGRASP_SERVO_ID,
-    PRIMITIVE_NAMES,
+    PRIMITIVE_VOCAB_LEGACY,
     REOBSERVE_ID,
+    RECOVER_FAMILY_ID,
     RETREAT_ID,
     TRANSPORT_TO_DROPZONE_ID,
+    TRANSPORT_FAMILY_ID,
     VERIFY_TARGET_ID,
+    family_projected_primitives,
+    project_primitive_ids,
 )
-from ..sim.task_defs import TASK_SPECS, primitive_instruction, task_action_hint, task_instruction
+from ..sim.task_defs import TASK_SPECS, primitive_instruction, task_action_hint, task_allowed_primitives, task_instruction, task_primary_primitives
 from ..sim.task_defs import NUM_SUPERVISION_STAGES
+
+OBSERVATION_FAMILY_IDS = (OBSERVE_FAMILY_ID, CONFIRM_FAMILY_ID, HOLD_FAMILY_ID)
 
 
 def _hash_text_embedding(text: str, dim: int) -> torch.Tensor:
@@ -43,56 +57,113 @@ def _hash_text_embedding(text: str, dim: int) -> torch.Tensor:
     return vec / norm
 
 
-def _fixed_prompt_embedding_table(task_vocab_size: int, language_dim: int) -> torch.Tensor:
+def _fixed_prompt_embedding_table(
+    task_vocab_size: int,
+    language_dim: int,
+    primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY,
+) -> torch.Tensor:
     table = torch.zeros(task_vocab_size, language_dim, dtype=torch.float32)
     task_specs = sorted(TASK_SPECS.values(), key=lambda spec: spec.task_id)
     for spec in task_specs:
         if spec.task_id >= task_vocab_size:
             continue
-        table[spec.task_id] = _hash_text_embedding(task_instruction(spec.task_id), language_dim)
+        table[spec.task_id] = _hash_text_embedding(
+            task_instruction(spec.task_id, primitive_vocabulary=primitive_vocabulary),
+            language_dim,
+        )
     return table
 
 
-def _fixed_task_action_hint_table(task_vocab_size: int, language_dim: int) -> torch.Tensor:
+def _fixed_task_action_hint_table(
+    task_vocab_size: int,
+    language_dim: int,
+    primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY,
+) -> torch.Tensor:
     table = torch.zeros(task_vocab_size, language_dim, dtype=torch.float32)
     task_specs = sorted(TASK_SPECS.values(), key=lambda spec: spec.task_id)
     for spec in task_specs:
         if spec.task_id >= task_vocab_size:
             continue
-        table[spec.task_id] = _hash_text_embedding(task_action_hint(spec.task_id), language_dim)
+        table[spec.task_id] = _hash_text_embedding(
+            task_action_hint(spec.task_id, primitive_vocabulary=primitive_vocabulary),
+            language_dim,
+        )
     return table
 
 
-def _fixed_primitive_text_embedding_table(action_dim: int, language_dim: int) -> torch.Tensor:
+def _valid_projected_primitives(
+    primitive_ids: tuple[int, ...] | list[int] | set[int],
+    action_dim: int,
+    primitive_vocabulary: str,
+) -> list[int]:
+    return [
+        primitive_id
+        for primitive_id in project_primitive_ids(primitive_ids, primitive_vocabulary=primitive_vocabulary)
+        if 0 <= primitive_id < action_dim
+    ]
+
+
+def _valid_family_primitives(
+    family_ids: tuple[int, ...] | list[int] | set[int],
+    action_dim: int,
+    primitive_vocabulary: str,
+) -> list[int]:
+    return [
+        primitive_id
+        for primitive_id in family_projected_primitives(family_ids, primitive_vocabulary=primitive_vocabulary)
+        if 0 <= primitive_id < action_dim
+    ]
+
+
+def _fixed_primitive_text_embedding_table(
+    action_dim: int,
+    language_dim: int,
+    primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY,
+) -> torch.Tensor:
     table = torch.zeros(action_dim, language_dim, dtype=torch.float32)
     for primitive_id in range(action_dim):
-        table[primitive_id] = _hash_text_embedding(primitive_instruction(primitive_id), language_dim)
+        table[primitive_id] = _hash_text_embedding(
+            primitive_instruction(primitive_id, primitive_vocabulary=primitive_vocabulary),
+            language_dim,
+        )
     return table
 
 
-def _fixed_task_action_prior_table(task_vocab_size: int, action_dim: int, negative_value: float = 0.0) -> torch.Tensor:
+def _fixed_task_action_prior_table(
+    task_vocab_size: int,
+    action_dim: int,
+    negative_value: float = 0.0,
+    primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY,
+) -> torch.Tensor:
     table = torch.full((task_vocab_size, action_dim), negative_value, dtype=torch.float32)
     task_specs = sorted(TASK_SPECS.values(), key=lambda spec: spec.task_id)
     for spec in task_specs:
         if spec.task_id >= task_vocab_size:
             continue
-        for primitive_id in spec.primary_primitives:
+        for primitive_id in task_allowed_primitives(spec.task_id, primitive_vocabulary=primitive_vocabulary):
+            if 0 <= primitive_id < action_dim:
+                table[spec.task_id, primitive_id] = 0.45
+        for primitive_id in task_primary_primitives(spec.task_id, primitive_vocabulary=primitive_vocabulary):
             if 0 <= primitive_id < action_dim:
                 table[spec.task_id, primitive_id] = 1.0
-        if HOLD_POSITION_ID < action_dim:
-            table[spec.task_id, HOLD_POSITION_ID] = max(table[spec.task_id, HOLD_POSITION_ID], 0.6)
-        if ABORT_ID < action_dim:
-            table[spec.task_id, ABORT_ID] = max(table[spec.task_id, ABORT_ID], 0.35)
+        for primitive_id in _valid_family_primitives((HOLD_FAMILY_ID,), action_dim, primitive_vocabulary):
+            table[spec.task_id, primitive_id] = max(table[spec.task_id, primitive_id], 0.6)
+        for primitive_id in _valid_family_primitives((ABORT_FAMILY_ID,), action_dim, primitive_vocabulary):
+            table[spec.task_id, primitive_id] = max(table[spec.task_id, primitive_id], 0.35)
     return table
 
 
-def _fixed_task_action_mask_table(task_vocab_size: int, action_dim: int) -> torch.Tensor:
+def _fixed_task_action_mask_table(
+    task_vocab_size: int,
+    action_dim: int,
+    primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY,
+) -> torch.Tensor:
     table = torch.zeros((task_vocab_size, action_dim), dtype=torch.float32)
     task_specs = sorted(TASK_SPECS.values(), key=lambda spec: spec.task_id)
     for spec in task_specs:
         if spec.task_id >= task_vocab_size:
             continue
-        for primitive_id in spec.primary_primitives:
+        for primitive_id in task_allowed_primitives(spec.task_id, primitive_vocabulary=primitive_vocabulary):
             if 0 <= primitive_id < action_dim:
                 table[spec.task_id, primitive_id] = 1.0
     fallback = table.sum(dim=-1) == 0
@@ -101,7 +172,11 @@ def _fixed_task_action_mask_table(task_vocab_size: int, action_dim: int) -> torc
     return table
 
 
-def _fixed_stage_action_prior_table(stage_aux_classes: int, action_dim: int) -> torch.Tensor:
+def _fixed_stage_action_prior_table(
+    stage_aux_classes: int,
+    action_dim: int,
+    primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY,
+) -> torch.Tensor:
     table = torch.full((stage_aux_classes, action_dim), -0.25, dtype=torch.float32)
 
     def _set(stage_id: int, indices: list[int], value: float = 1.0) -> None:
@@ -111,38 +186,51 @@ def _fixed_stage_action_prior_table(stage_aux_classes: int, action_dim: int) -> 
             if 0 <= primitive_id < action_dim:
                 table[stage_id, primitive_id] = value
 
+    observe_ids = _valid_family_primitives((OBSERVE_FAMILY_ID,), action_dim, primitive_vocabulary)
+    confirm_ids = _valid_family_primitives((CONFIRM_FAMILY_ID,), action_dim, primitive_vocabulary)
+    approach_ids = _valid_family_primitives((APPROACH_FAMILY_ID,), action_dim, primitive_vocabulary)
+    recover_ids = _valid_family_primitives((RECOVER_FAMILY_ID,), action_dim, primitive_vocabulary)
+    grasp_ids = _valid_family_primitives((GRASP_FAMILY_ID,), action_dim, primitive_vocabulary)
+    lift_ids = _valid_family_primitives((LIFT_FAMILY_ID,), action_dim, primitive_vocabulary)
+    transport_ids = _valid_family_primitives((TRANSPORT_FAMILY_ID,), action_dim, primitive_vocabulary)
+    place_ids = _valid_family_primitives((PLACE_FAMILY_ID,), action_dim, primitive_vocabulary)
+    hold_ids = _valid_family_primitives((HOLD_FAMILY_ID,), action_dim, primitive_vocabulary)
+    abort_ids = _valid_family_primitives((ABORT_FAMILY_ID,), action_dim, primitive_vocabulary)
+
     # Observe / search.
-    _set(0, [OBS_LEFT_ID, OBS_RIGHT_ID, OBS_CENTER_ID, REOBSERVE_ID], 1.0)
-    _set(0, [VERIFY_TARGET_ID, RETREAT_ID], 0.55)
-    _set(0, [HOLD_POSITION_ID, ABORT_ID], 0.15)
-    # Verify.
-    _set(1, [VERIFY_TARGET_ID, HOLD_POSITION_ID], 1.0)
-    _set(1, [OBS_LEFT_ID, OBS_RIGHT_ID, OBS_CENTER_ID], 0.5)
-    _set(1, [ABORT_ID], 0.2)
-    # Approach / prealign.
-    _set(2, [PREALIGN_GRASP_ID, APPROACH_COARSE_ID, APPROACH_FINE_ID], 1.0)
-    _set(2, [VERIFY_TARGET_ID, RETREAT_ID], 0.55)
-    _set(2, [HOLD_POSITION_ID, ABORT_ID], 0.2)
-    # Pregrasp alignment.
-    _set(3, [PREGRASP_SERVO_ID, REOBSERVE_ID, RETREAT_ID], 1.0)
-    _set(3, [GRASP_EXECUTE_ID], 0.55)
-    _set(3, [ABORT_ID], 0.25)
+    _set(0, observe_ids, 1.0)
+    _set(0, confirm_ids, 0.70)
+    _set(0, recover_ids, 0.35)
+    _set(0, hold_ids + abort_ids, 0.15)
+    # Confirm.
+    _set(1, confirm_ids + hold_ids, 1.0)
+    _set(1, observe_ids, 0.45)
+    _set(1, abort_ids, 0.2)
+    # Approach / recover.
+    _set(2, approach_ids, 1.0)
+    _set(2, recover_ids, 0.75)
+    _set(2, observe_ids, 0.30)
+    _set(2, hold_ids + abort_ids, 0.2)
     # Grasp.
-    _set(4, [GRASP_EXECUTE_ID], 1.0)
-    _set(4, [PREGRASP_SERVO_ID, RETREAT_ID], 0.45)
-    _set(4, [LIFT_OBJECT_ID], 0.35)
-    _set(4, [ABORT_ID], 0.2)
+    _set(3, grasp_ids, 1.0)
+    _set(3, approach_ids, 0.55)
+    _set(3, lift_ids, 0.50)
+    _set(3, recover_ids + abort_ids, 0.2)
     # Lift.
-    _set(5, [LIFT_OBJECT_ID], 1.0)
-    _set(5, [TRANSPORT_TO_DROPZONE_ID, RETREAT_ID], 0.55)
-    _set(5, [ABORT_ID], 0.2)
-    # Transport / place.
-    _set(6, [TRANSPORT_TO_DROPZONE_ID, PLACE_OBJECT_ID], 1.0)
-    _set(6, [RETREAT_ID], 0.45)
-    _set(6, [HOLD_POSITION_ID, ABORT_ID], 0.2)
+    _set(4, lift_ids, 1.0)
+    _set(4, transport_ids, 0.65)
+    _set(4, recover_ids + abort_ids, 0.2)
+    # Transport.
+    _set(5, transport_ids, 1.0)
+    _set(5, place_ids, 0.70)
+    _set(5, recover_ids + abort_ids, 0.2)
+    # Place.
+    _set(6, place_ids, 1.0)
+    _set(6, transport_ids, 0.40)
+    _set(6, hold_ids + abort_ids, 0.2)
     # Terminal.
-    _set(7, [HOLD_POSITION_ID, PLACE_OBJECT_ID, ABORT_ID], 1.0)
-    _set(7, [RETREAT_ID], 0.35)
+    _set(7, hold_ids + place_ids + abort_ids, 1.0)
+    _set(7, recover_ids, 0.2)
     return table
 
 
@@ -185,6 +273,48 @@ def _extract_progress_bins(state: torch.Tensor, num_bins: int) -> torch.Tensor:
     return scaled.clamp(0, max(num_bins - 1, 0))
 
 
+def _progressive_scale_from_stage_ids(
+    stage_ids: torch.Tensor,
+    num_bins: int,
+    min_scale: float,
+    max_scale: float,
+    *,
+    start_stage: int | None = None,
+    end_stage: int | None = None,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    if stage_ids.ndim == 0:
+        stage_ids = stage_ids.unsqueeze(0)
+    if start_stage is not None or end_stage is not None:
+        active = torch.ones(stage_ids.shape, device=stage_ids.device, dtype=torch.bool)
+        if start_stage is not None:
+            active = active & (stage_ids >= int(start_stage))
+        if end_stage is not None:
+            active = active & (stage_ids <= int(end_stage))
+        low_scale = float(min_scale if start_stage is not None else 0.0)
+        high_scale = float(max_scale)
+        scale = torch.where(
+            active,
+            torch.full(stage_ids.shape, high_scale, device=stage_ids.device, dtype=dtype),
+            torch.full(stage_ids.shape, low_scale, device=stage_ids.device, dtype=dtype),
+        )
+        return scale.unsqueeze(-1)
+    if start_stage is not None:
+        scale = torch.where(
+            stage_ids < int(start_stage),
+            torch.full(stage_ids.shape, min_scale, device=stage_ids.device, dtype=dtype),
+            torch.full(stage_ids.shape, max_scale, device=stage_ids.device, dtype=dtype),
+        )
+        return scale.unsqueeze(-1)
+    if num_bins <= 1:
+        return torch.ones((*stage_ids.shape, 1), device=stage_ids.device, dtype=dtype) * float(max_scale)
+    if abs(max_scale - min_scale) < 1.0e-8:
+        return torch.ones((*stage_ids.shape, 1), device=stage_ids.device, dtype=dtype) * float(max_scale)
+    stage_ratio = stage_ids.float() / float(max(num_bins - 1, 1))
+    scale = min_scale + (max_scale - min_scale) * stage_ratio
+    return scale.unsqueeze(-1).to(dtype=dtype)
+
+
 def _predicted_stage_ids_from_latent(z: torch.Tensor, stage_head: nn.Module, stage_aux_classes: int) -> torch.Tensor:
     if z.ndim == 1:
         z = z.unsqueeze(0)
@@ -198,6 +328,7 @@ def _stage_action_mask(
     task_ids: torch.Tensor,
     state: torch.Tensor,
     action_dim: int,
+    primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY,
 ) -> torch.Tensor:
     if state.ndim == 1:
         state = state.unsqueeze(0)
@@ -214,50 +345,60 @@ def _stage_action_mask(
             col_idx = torch.tensor(indices, device=device, dtype=torch.long)
             mask[row_idx.unsqueeze(1), col_idx.unsqueeze(0)] = 1.0
 
-    # level1_verify
-    rows = task_ids == 0
-    _set_rows(rows & (~verified), [OBS_LEFT_ID, OBS_RIGHT_ID, OBS_CENTER_ID, VERIFY_TARGET_ID, ABORT_ID])
-    _set_rows(rows & verified, [HOLD_POSITION_ID, ABORT_ID])
+    # Generic manipulation phases. Task-specific differences are handled later
+    # by intersecting this phase mask with the task-level allowed-action mask.
+    hold_ids = _valid_family_primitives((HOLD_FAMILY_ID,), action_dim, primitive_vocabulary)
+    place_ids = _valid_family_primitives((PLACE_FAMILY_ID,), action_dim, primitive_vocabulary)
+    abort_ids = _valid_family_primitives((ABORT_FAMILY_ID,), action_dim, primitive_vocabulary)
+    lift_ids = _valid_family_primitives((LIFT_FAMILY_ID,), action_dim, primitive_vocabulary)
+    recover_ids = _valid_family_primitives((RECOVER_FAMILY_ID,), action_dim, primitive_vocabulary)
+    transport_ids = _valid_family_primitives((TRANSPORT_FAMILY_ID,), action_dim, primitive_vocabulary)
+    observe_ids = _valid_family_primitives((OBSERVE_FAMILY_ID,), action_dim, primitive_vocabulary)
+    confirm_ids = _valid_family_primitives((CONFIRM_FAMILY_ID,), action_dim, primitive_vocabulary)
+    approach_ids = _valid_family_primitives((APPROACH_FAMILY_ID,), action_dim, primitive_vocabulary)
+    grasp_ids = _valid_family_primitives((GRASP_FAMILY_ID,), action_dim, primitive_vocabulary)
 
-    # level2_approach
-    rows = task_ids == 1
-    _set_rows(
-        rows & (~verified),
-        [
-            OBS_LEFT_ID,
-            OBS_RIGHT_ID,
-            OBS_CENTER_ID,
-            VERIFY_TARGET_ID,
-            PREALIGN_GRASP_ID,
-            APPROACH_COARSE_ID,
-            APPROACH_FINE_ID,
-            RETREAT_ID,
-            ABORT_ID,
-        ],
-    )
-    _set_rows(
-        rows & verified,
-        [
-            OBS_LEFT_ID,
-            OBS_RIGHT_ID,
-            OBS_CENTER_ID,
-            VERIFY_TARGET_ID,
-            PREALIGN_GRASP_ID,
-            APPROACH_COARSE_ID,
-            APPROACH_FINE_ID,
-            RETREAT_ID,
-            HOLD_POSITION_ID,
-            ABORT_ID,
-        ],
-    )
+    rows = placed
+    _set_rows(rows, hold_ids + place_ids + abort_ids)
 
-    # level3_pick_place
-    rows = task_ids == 2
-    _set_rows(rows & (~attached) & (~placed), [REOBSERVE_ID, PREGRASP_SERVO_ID, GRASP_EXECUTE_ID, RETREAT_ID, ABORT_ID])
-    _set_rows(rows & attached & (~lifted) & (~placed), [LIFT_OBJECT_ID, RETREAT_ID, ABORT_ID])
-    _set_rows(rows & attached & lifted & (~placed), [TRANSPORT_TO_DROPZONE_ID, PLACE_OBJECT_ID, RETREAT_ID, ABORT_ID])
-    _set_rows(rows & placed, [HOLD_POSITION_ID, ABORT_ID])
+    rows = (~placed) & attached & (~lifted)
+    _set_rows(rows, lift_ids + recover_ids + abort_ids)
 
+    rows = (~placed) & attached & lifted
+    _set_rows(rows, transport_ids + place_ids + recover_ids + hold_ids + abort_ids)
+
+    rows = (~placed) & (~attached) & verified
+    _set_rows(rows, observe_ids + confirm_ids + approach_ids + grasp_ids + recover_ids + hold_ids + abort_ids)
+
+    rows = (~placed) & (~attached) & (~verified)
+    _set_rows(rows, observe_ids + confirm_ids + approach_ids + recover_ids + abort_ids)
+
+    fallback = mask.sum(dim=-1) == 0
+    if fallback.any():
+        mask[fallback] = 1.0
+
+    # Intersect generic phase mask with task-level allowed sets so the same
+    # phase logic can be reused across tasks without enabling out-of-task
+    # primitives.
+    task_mask = torch.zeros_like(mask)
+    for spec in TASK_SPECS.values():
+        row_mask = task_ids == int(spec.task_id)
+        if not row_mask.any():
+            continue
+        allowed = [
+            primitive_id
+            for primitive_id in task_allowed_primitives(spec.task_id, primitive_vocabulary=primitive_vocabulary)
+            if 0 <= primitive_id < action_dim
+        ]
+        if not allowed:
+            continue
+        row_idx = torch.nonzero(row_mask, as_tuple=False).squeeze(-1)
+        col_idx = torch.tensor(allowed, device=device, dtype=torch.long)
+        task_mask[row_idx.unsqueeze(1), col_idx.unsqueeze(0)] = 1.0
+    mask = mask * task_mask
+    fallback = mask.sum(dim=-1) == 0
+    if fallback.any():
+        mask[fallback] = task_mask[fallback]
     fallback = mask.sum(dim=-1) == 0
     if fallback.any():
         mask[fallback] = 1.0
@@ -269,16 +410,27 @@ def _mask_policy_logits(
     state: torch.Tensor,
     task_ids: torch.Tensor | None,
     task_vocab_size: int,
+    primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY,
 ) -> torch.Tensor:
     if logits.ndim == 2:
         resolved_task_ids = _resolve_task_ids(task_ids, state, task_vocab_size)
-        action_mask = _stage_action_mask(resolved_task_ids, state, logits.shape[-1]).to(dtype=logits.dtype)
+        action_mask = _stage_action_mask(
+            resolved_task_ids,
+            state,
+            logits.shape[-1],
+            primitive_vocabulary=primitive_vocabulary,
+        ).to(dtype=logits.dtype)
         return logits.masked_fill(action_mask < 0.5, -1.0e9)
     if logits.ndim == 3:
         batch, steps, action_dim = logits.shape
         if state.ndim == 2:
             resolved_task_ids = _resolve_task_ids(task_ids, state, task_vocab_size)
-            action_mask = _stage_action_mask(resolved_task_ids, state, action_dim).to(dtype=logits.dtype)
+            action_mask = _stage_action_mask(
+                resolved_task_ids,
+                state,
+                action_dim,
+                primitive_vocabulary=primitive_vocabulary,
+            ).to(dtype=logits.dtype)
             return logits.masked_fill(action_mask.unsqueeze(1) < 0.5, -1.0e9)
         if state.ndim == 3:
             flat_state = state.reshape(batch * steps, state.shape[-1])
@@ -287,7 +439,12 @@ def _mask_policy_logits(
             else:
                 flat_task_ids = task_ids.unsqueeze(1).expand(batch, steps).reshape(-1)
             resolved_task_ids = _resolve_task_ids(flat_task_ids, flat_state, task_vocab_size)
-            action_mask = _stage_action_mask(resolved_task_ids, flat_state, action_dim).to(dtype=logits.dtype)
+            action_mask = _stage_action_mask(
+                resolved_task_ids,
+                flat_state,
+                action_dim,
+                primitive_vocabulary=primitive_vocabulary,
+            ).to(dtype=logits.dtype)
             return logits.masked_fill(action_mask.view(batch, steps, action_dim) < 0.5, -1.0e9)
     raise ValueError(f"Unsupported logits rank for action masking: {logits.ndim}")
 
@@ -298,8 +455,9 @@ def _stage_action_prior(
     action_dim: int,
     positive: float = 1.0,
     negative: float = -1.0,
+    primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY,
 ) -> torch.Tensor:
-    mask = _stage_action_mask(task_ids, state, action_dim)
+    mask = _stage_action_mask(task_ids, state, action_dim, primitive_vocabulary=primitive_vocabulary)
     return torch.where(mask > 0.5, torch.full_like(mask, positive), torch.full_like(mask, negative))
 
 
@@ -313,6 +471,7 @@ class ImageEncoder(nn.Module):
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
+            nn.AdaptiveAvgPool2d((11, 11)),
             nn.Flatten(),
             nn.Linear(64 * 11 * 11, hidden_dim),
             nn.ReLU(),
@@ -338,11 +497,42 @@ class BaseTTLAModel(nn.Module, ABC):
         stage_aux_classes: int = NUM_SUPERVISION_STAGES,
         adapter_hidden_dim: int = 64,
         adapter_scale: float = 0.1,
+        adapter_mode: str = "full",
+        adapter_use_gate: bool = True,
+        adapter_use_condition_branch: bool = True,
+        adapter_use_task_condition: bool = True,
+        adapter_use_stage_condition: bool = True,
+        adapter_use_prev_action_condition: bool = True,
+        adapter_progressive_min_scale: float = 1.0,
+        adapter_progressive_max_scale: float = 1.0,
+        adapter_stage_scales: list[float] | tuple[float, ...] | None = None,
+        adapter_condition_start_stage: int | None = None,
+        adapter_condition_end_stage: int | None = None,
+        adapter_condition_observation_only: bool = False,
+        adapter_condition_non_observation_scale: float = 0.0,
+        adapter_phase_split: bool = False,
         task_prior_scale: float = 1.0,
         task_prior_negative_value: float = 0.0,
         stage_prior_scale: float = 0.0,
         predicted_stage_prior_scale: float = 0.0,
         task_hard_mask: bool = False,
+        stage_hard_mask: bool = False,
+        latent_affine_alignment: bool = False,
+        latent_affine_task_conditioned: bool = True,
+        latent_affine_max_scale: float = 4.0,
+        latent_affine_blend: float = 1.0,
+        transition_action_adapter: bool = False,
+        transition_action_adapter_scale: float = 1.0,
+        transition_residual_adapter: bool = False,
+        transition_residual_hidden_dim: int = 64,
+        transition_residual_scale: float = 0.1,
+        transition_residual_phase_split: bool = False,
+        transition_residual_observation_scale: float = 1.0,
+        transition_residual_non_observation_scale: float = 1.0,
+        policy_residual_adapter: bool = False,
+        policy_residual_hidden_dim: int = 64,
+        policy_residual_scale: float = 0.1,
+        primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY,
         **_unused: Any,
     ) -> None:
         super().__init__()
@@ -356,27 +546,110 @@ class BaseTTLAModel(nn.Module, ABC):
         self.transition_stage_bins = transition_stage_bins
         self.stage_aux_classes = stage_aux_classes
         self.adapter_scale = adapter_scale
+        self.adapter_mode = str(adapter_mode).lower()
+        self.adapter_use_gate = adapter_use_gate
+        self.adapter_use_condition_branch = adapter_use_condition_branch
+        self.adapter_use_task_condition = adapter_use_task_condition
+        self.adapter_use_stage_condition = adapter_use_stage_condition
+        self.adapter_use_prev_action_condition = adapter_use_prev_action_condition
+        self.adapter_progressive_min_scale = adapter_progressive_min_scale
+        self.adapter_progressive_max_scale = adapter_progressive_max_scale
+        self.adapter_condition_start_stage = adapter_condition_start_stage
+        self.adapter_condition_end_stage = adapter_condition_end_stage
+        self.adapter_condition_observation_only = adapter_condition_observation_only
+        self.adapter_condition_non_observation_scale = adapter_condition_non_observation_scale
+        self.adapter_phase_split = bool(adapter_phase_split)
         self.task_prior_scale = task_prior_scale
         self.task_prior_negative_value = task_prior_negative_value
         self.stage_prior_scale = stage_prior_scale
         self.predicted_stage_prior_scale = predicted_stage_prior_scale
         self.task_hard_mask = task_hard_mask
+        self.stage_hard_mask = stage_hard_mask
+        self.latent_affine_alignment = bool(latent_affine_alignment)
+        self.latent_affine_task_conditioned = bool(latent_affine_task_conditioned)
+        self.latent_affine_max_scale = float(max(latent_affine_max_scale, 1.0))
+        self.latent_affine_blend = float(max(0.0, min(latent_affine_blend, 1.0)))
+        self.use_transition_action_adapter = bool(transition_action_adapter)
+        self.transition_action_adapter_scale = float(transition_action_adapter_scale)
+        self.use_transition_residual_adapter = bool(transition_residual_adapter)
+        self.transition_residual_scale = float(transition_residual_scale)
+        self.transition_residual_phase_split = bool(transition_residual_phase_split)
+        self.transition_residual_observation_scale = float(transition_residual_observation_scale)
+        self.transition_residual_non_observation_scale = float(transition_residual_non_observation_scale)
+        self.use_policy_residual_adapter = bool(policy_residual_adapter)
+        self.policy_residual_scale = float(policy_residual_scale)
+        self.primitive_vocabulary = str(primitive_vocabulary).lower()
         self.proprio_dim = max(state_dim - 1, 1)
         self.context_init = nn.Parameter(torch.zeros(1), requires_grad=False)
         self.action_embedding = nn.Embedding(action_dim, action_embed_dim)
-        self.register_buffer("task_prompt_embedding_table", _fixed_prompt_embedding_table(task_vocab_size, task_embed_dim))
+        self.register_buffer(
+            "adapter_stage_scale_vector",
+            torch.ones(stage_aux_classes, dtype=torch.float32),
+        )
+        self.register_buffer(
+            "task_prompt_embedding_table",
+            _fixed_prompt_embedding_table(
+                task_vocab_size,
+                task_embed_dim,
+                primitive_vocabulary=self.primitive_vocabulary,
+            ),
+        )
         self.register_buffer(
             "task_action_prior_table",
-            _fixed_task_action_prior_table(task_vocab_size, action_dim, negative_value=task_prior_negative_value),
+            _fixed_task_action_prior_table(
+                task_vocab_size,
+                action_dim,
+                negative_value=task_prior_negative_value,
+                primitive_vocabulary=self.primitive_vocabulary,
+            ),
         )
-        self.register_buffer("task_action_mask_table", _fixed_task_action_mask_table(task_vocab_size, action_dim))
-        self.register_buffer("stage_action_prior_table", _fixed_stage_action_prior_table(stage_aux_classes, action_dim))
+        self.register_buffer(
+            "task_action_mask_table",
+            _fixed_task_action_mask_table(
+                task_vocab_size,
+                action_dim,
+                primitive_vocabulary=self.primitive_vocabulary,
+            ),
+        )
+        self.register_buffer(
+            "stage_action_prior_table",
+            _fixed_stage_action_prior_table(
+                stage_aux_classes,
+                action_dim,
+                primitive_vocabulary=self.primitive_vocabulary,
+            ),
+        )
+        self.register_buffer("latent_align_source_mean", torch.zeros(task_vocab_size, latent_dim, dtype=torch.float32))
+        self.register_buffer("latent_align_source_std", torch.ones(task_vocab_size, latent_dim, dtype=torch.float32))
+        self.register_buffer("latent_align_target_mean", torch.zeros(task_vocab_size, latent_dim, dtype=torch.float32))
+        self.register_buffer("latent_align_target_std", torch.ones(task_vocab_size, latent_dim, dtype=torch.float32))
         self.transition_task_embedding = nn.Embedding(task_vocab_size, action_embed_dim)
         self.transition_stage_embedding = nn.Embedding(transition_stage_bins, action_embed_dim)
+        self.transition_action_adapter_embedding = nn.Embedding(action_dim, action_embed_dim)
         self.transition = nn.Sequential(
             nn.Linear(latent_dim + action_embed_dim * 3, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, latent_dim),
+        )
+        self.transition_residual_adapter = nn.Sequential(
+            nn.Linear(latent_dim + action_embed_dim * 3, transition_residual_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(transition_residual_hidden_dim, latent_dim),
+        )
+        self.transition_non_observation_residual_adapter = nn.Sequential(
+            nn.Linear(latent_dim + action_embed_dim * 3, transition_residual_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(transition_residual_hidden_dim, latent_dim),
+        )
+        self.policy_residual_adapter = nn.Sequential(
+            nn.Linear(latent_dim, policy_residual_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(policy_residual_hidden_dim, action_dim),
+        )
+        self.inverse_head = nn.Sequential(
+            nn.Linear(latent_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, action_dim),
         )
         self.stage_head = nn.Sequential(
             nn.Linear(latent_dim, hidden_dim),
@@ -391,20 +664,81 @@ class BaseTTLAModel(nn.Module, ABC):
         )
         self.adapter_task_embedding = nn.Embedding(task_vocab_size, task_embed_dim)
         self.adapter_stage_embedding = nn.Embedding(stage_aux_classes, task_embed_dim)
+        self.adapter_prev_action_embedding = nn.Embedding(action_dim + 1, action_embed_dim)
         self.adapter_condition = nn.Sequential(
-            nn.Linear(latent_dim + task_embed_dim * 2, adapter_hidden_dim),
+            nn.Linear(latent_dim + task_embed_dim * 2 + action_embed_dim, adapter_hidden_dim),
             nn.ReLU(),
             nn.Linear(adapter_hidden_dim, latent_dim),
             nn.Tanh(),
+        )
+        self.adapter_gate = nn.Sequential(
+            nn.Linear(latent_dim + task_embed_dim * 2 + action_embed_dim, adapter_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(adapter_hidden_dim, latent_dim),
+        )
+        self.adapter_non_observation = nn.Sequential(
+            nn.Linear(latent_dim, adapter_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(adapter_hidden_dim, latent_dim),
+            nn.Tanh(),
+        )
+        self.adapter_non_observation_condition = nn.Sequential(
+            nn.Linear(latent_dim + task_embed_dim * 2 + action_embed_dim, adapter_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(adapter_hidden_dim, latent_dim),
+            nn.Tanh(),
+        )
+        self.adapter_non_observation_gate = nn.Sequential(
+            nn.Linear(latent_dim + task_embed_dim * 2 + action_embed_dim, adapter_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(adapter_hidden_dim, latent_dim),
         )
         nn.init.zeros_(self.adapter[2].weight)
         nn.init.zeros_(self.adapter[2].bias)
         nn.init.zeros_(self.adapter_condition[2].weight)
         nn.init.zeros_(self.adapter_condition[2].bias)
+        nn.init.zeros_(self.adapter_gate[2].weight)
+        nn.init.zeros_(self.adapter_gate[2].bias)
+        nn.init.zeros_(self.adapter_non_observation[2].weight)
+        nn.init.zeros_(self.adapter_non_observation[2].bias)
+        nn.init.zeros_(self.adapter_non_observation_condition[2].weight)
+        nn.init.zeros_(self.adapter_non_observation_condition[2].bias)
+        nn.init.zeros_(self.adapter_non_observation_gate[2].weight)
+        nn.init.zeros_(self.adapter_non_observation_gate[2].bias)
+        nn.init.zeros_(self.transition_action_adapter_embedding.weight)
+        nn.init.zeros_(self.transition_residual_adapter[2].weight)
+        nn.init.zeros_(self.transition_residual_adapter[2].bias)
+        nn.init.zeros_(self.transition_non_observation_residual_adapter[2].weight)
+        nn.init.zeros_(self.transition_non_observation_residual_adapter[2].bias)
+        nn.init.zeros_(self.policy_residual_adapter[2].weight)
+        nn.init.zeros_(self.policy_residual_adapter[2].bias)
+        if adapter_stage_scales is not None:
+            self.set_adapter_stage_scales(adapter_stage_scales)
+        if self.adapter_mode not in {"full", "legacy_prevprim"}:
+            raise ValueError(f"Unsupported adapter_mode: {self.adapter_mode}")
 
     @property
     def backbone_type(self) -> str:
         return getattr(self, "_backbone_type", "feedforward")
+
+    def set_adapter_stage_scales(self, stage_scales: list[float] | tuple[float, ...] | torch.Tensor) -> None:
+        scale_tensor = torch.as_tensor(
+            stage_scales,
+            dtype=self.adapter_stage_scale_vector.dtype,
+            device=self.adapter_stage_scale_vector.device,
+        )
+        if scale_tensor.ndim != 1:
+            raise ValueError("adapter stage scales must be a 1D sequence or tensor")
+        if scale_tensor.numel() < self.stage_aux_classes:
+            pad = torch.ones(
+                self.stage_aux_classes - scale_tensor.numel(),
+                dtype=scale_tensor.dtype,
+                device=scale_tensor.device,
+            )
+            scale_tensor = torch.cat([scale_tensor, pad], dim=0)
+        elif scale_tensor.numel() > self.stage_aux_classes:
+            scale_tensor = scale_tensor[: self.stage_aux_classes]
+        self.adapter_stage_scale_vector.copy_(scale_tensor.clamp_min(0.0))
 
     def _task_embedding(self, task_ids: torch.Tensor | None, state: torch.Tensor | None) -> torch.Tensor:
         resolved_task_ids = _resolve_task_ids(task_ids, state, self.task_vocab_size)
@@ -425,14 +759,18 @@ class BaseTTLAModel(nn.Module, ABC):
     def _proprio_state(self, state: torch.Tensor) -> torch.Tensor:
         return _strip_task_feature(state)
 
-    def predict_next(
+    def _transition_context_embeddings(
         self,
-        z: torch.Tensor,
         action_index: torch.Tensor,
         state: torch.Tensor | None = None,
         task_ids: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        action_emb = self.action_embedding(action_index.long())
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        resolved_action_index = action_index.long()
+        action_emb = self.action_embedding(resolved_action_index)
+        if self.use_transition_action_adapter:
+            action_emb = action_emb + self.transition_action_adapter_scale * self.transition_action_adapter_embedding(
+                resolved_action_index
+            )
         if state is None:
             if task_ids is None:
                 task_emb = torch.zeros_like(action_emb)
@@ -445,7 +783,100 @@ class BaseTTLAModel(nn.Module, ABC):
             stage_ids = _extract_progress_bins(state, self.transition_stage_bins)
             task_emb = self.transition_task_embedding(resolved_task_ids)
             stage_emb = self.transition_stage_embedding(stage_ids)
+        return action_emb, task_emb, stage_emb
+
+    def transition_adapter_delta(
+        self,
+        z: torch.Tensor,
+        action_index: torch.Tensor,
+        state: torch.Tensor | None = None,
+        task_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if not self.use_transition_residual_adapter:
+            return torch.zeros_like(z)
+        action_emb, task_emb, stage_emb = self._transition_context_embeddings(
+            action_index,
+            state=state,
+            task_ids=task_ids,
+        )
+        transition_input = torch.cat([z, action_emb, task_emb, stage_emb], dim=-1)
+        if self.transition_residual_phase_split:
+            observation_mask = self._primitive_observation_mask(action_index.long())
+            obs_delta = self.transition_residual_adapter(transition_input)
+            non_obs_delta = self.transition_non_observation_residual_adapter(transition_input)
+            obs_scale = torch.full(
+                (z.shape[0], 1),
+                self.transition_residual_observation_scale,
+                device=z.device,
+                dtype=z.dtype,
+            )
+            non_obs_scale = torch.full(
+                (z.shape[0], 1),
+                self.transition_residual_non_observation_scale,
+                device=z.device,
+                dtype=z.dtype,
+            )
+            residual = torch.where(
+                observation_mask.unsqueeze(-1),
+                obs_scale * obs_delta,
+                non_obs_scale * non_obs_delta,
+            )
+        else:
+            base_delta = self.transition_residual_adapter(transition_input)
+            if abs(self.transition_residual_observation_scale - self.transition_residual_non_observation_scale) > 1.0e-8:
+                observation_mask = self._primitive_observation_mask(action_index.long())
+                scale = torch.where(
+                    observation_mask,
+                    torch.full_like(observation_mask, self.transition_residual_observation_scale, dtype=z.dtype),
+                    torch.full_like(observation_mask, self.transition_residual_non_observation_scale, dtype=z.dtype),
+                ).unsqueeze(-1)
+                residual = scale * base_delta
+            else:
+                residual = self.transition_residual_non_observation_scale * base_delta
+        return self.transition_residual_scale * residual
+
+    def transition_adapter_identity_penalty(self) -> torch.Tensor:
+        penalties: list[torch.Tensor] = []
+        for module in (
+            self.transition_residual_adapter,
+            self.transition_non_observation_residual_adapter,
+        ):
+            if module is None:
+                continue
+            for param in module.parameters():
+                penalties.append(param.pow(2).mean())
+        if not penalties:
+            return torch.zeros((), device=next(self.parameters()).device)
+        return torch.stack(penalties).sum()
+
+    def policy_adapter_identity_penalty(self) -> torch.Tensor:
+        penalties: list[torch.Tensor] = []
+        for param in self.policy_residual_adapter.parameters():
+            penalties.append(param.pow(2).mean())
+        if not penalties:
+            return torch.zeros((), device=next(self.parameters()).device)
+        return torch.stack(penalties).sum()
+
+    def predict_next(
+        self,
+        z: torch.Tensor,
+        action_index: torch.Tensor,
+        state: torch.Tensor | None = None,
+        task_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        action_emb, task_emb, stage_emb = self._transition_context_embeddings(
+            action_index,
+            state=state,
+            task_ids=task_ids,
+        )
         delta = self.transition(torch.cat([z, action_emb, task_emb, stage_emb], dim=-1))
+        if self.use_transition_residual_adapter:
+            delta = delta + self.transition_adapter_delta(
+                z,
+                action_index,
+                state=state,
+                task_ids=task_ids,
+            )
         return z + delta
 
     def _resolve_adapter_task_ids(
@@ -469,12 +900,86 @@ class BaseTTLAModel(nn.Module, ABC):
             return stage_ids.long().clamp(0, max(self.stage_aux_classes - 1, 0)).to(device=z.device)
         return _predicted_stage_ids_from_latent(z, self.stage_head, self.stage_aux_classes).reshape(-1)
 
+    def _resolve_adapter_prev_primitives(
+        self,
+        z: torch.Tensor,
+        prev_primitives: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if prev_primitives is None:
+            return torch.full(
+                (z.shape[0],),
+                self.action_dim,
+                dtype=torch.long,
+                device=z.device,
+            )
+        if prev_primitives.ndim > 1:
+            prev_primitives = prev_primitives.squeeze(-1)
+        return prev_primitives.long().clamp(0, self.action_dim).to(device=z.device)
+
+    def _adapter_observation_mask(self, resolved_prev_primitives: torch.Tensor) -> torch.Tensor:
+        is_observation = self._primitive_observation_mask(resolved_prev_primitives)
+        is_start_token = resolved_prev_primitives == self.action_dim
+        return is_observation | is_start_token
+
+    def _primitive_observation_mask(self, primitive_ids: torch.Tensor) -> torch.Tensor:
+        observation_ids = torch.tensor(
+            sorted(
+                _valid_family_primitives(
+                    OBSERVATION_FAMILY_IDS,
+                    self.action_dim,
+                    self.primitive_vocabulary,
+                )
+            ),
+            device=primitive_ids.device,
+            dtype=primitive_ids.dtype,
+        )
+        return (primitive_ids.unsqueeze(-1) == observation_ids.unsqueeze(0)).any(dim=-1)
+
+    def set_latent_alignment_stats(
+        self,
+        source_mean: torch.Tensor,
+        source_std: torch.Tensor,
+        target_mean: torch.Tensor,
+        target_std: torch.Tensor,
+    ) -> None:
+        self.latent_align_source_mean.copy_(source_mean.to(device=self.latent_align_source_mean.device, dtype=self.latent_align_source_mean.dtype))
+        self.latent_align_source_std.copy_(source_std.to(device=self.latent_align_source_std.device, dtype=self.latent_align_source_std.dtype))
+        self.latent_align_target_mean.copy_(target_mean.to(device=self.latent_align_target_mean.device, dtype=self.latent_align_target_mean.dtype))
+        self.latent_align_target_std.copy_(target_std.to(device=self.latent_align_target_std.device, dtype=self.latent_align_target_std.dtype))
+
+    def align_latent(
+        self,
+        z: torch.Tensor,
+        task_ids: torch.Tensor | None = None,
+        state: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if not self.latent_affine_alignment:
+            return z
+        if z.ndim == 1:
+            z = z.unsqueeze(0)
+        resolved_task_ids = _resolve_task_ids(task_ids, state, self.task_vocab_size).to(device=z.device)
+        if not self.latent_affine_task_conditioned:
+            resolved_task_ids = torch.zeros_like(resolved_task_ids)
+        source_mean = self.latent_align_source_mean.index_select(0, resolved_task_ids).to(dtype=z.dtype)
+        source_std = self.latent_align_source_std.index_select(0, resolved_task_ids).to(dtype=z.dtype)
+        target_mean = self.latent_align_target_mean.index_select(0, resolved_task_ids).to(dtype=z.dtype)
+        target_std = self.latent_align_target_std.index_select(0, resolved_task_ids).to(dtype=z.dtype).clamp_min(1.0e-6)
+        scale = (source_std / target_std).clamp(
+            min=1.0 / self.latent_affine_max_scale,
+            max=self.latent_affine_max_scale,
+        )
+        aligned = (z - target_mean) * scale + source_mean
+        if self.latent_affine_blend >= 1.0:
+            return aligned
+        return z + self.latent_affine_blend * (aligned - z)
+
     def adapt(
         self,
         z: torch.Tensor,
         task_ids: torch.Tensor | None = None,
         state: torch.Tensor | None = None,
         stage_ids: torch.Tensor | None = None,
+        prev_primitives: torch.Tensor | None = None,
     ) -> torch.Tensor:
         original_shape = z.shape
         if z.ndim == 1:
@@ -492,13 +997,117 @@ class BaseTTLAModel(nn.Module, ABC):
             flat_stage_ids = stage_ids.reshape(-1)
         else:
             flat_stage_ids = stage_ids
+        if prev_primitives is not None and prev_primitives.ndim == z.ndim - 1:
+            flat_prev_primitives = prev_primitives.reshape(-1)
+        else:
+            flat_prev_primitives = prev_primitives
         resolved_task_ids = self._resolve_adapter_task_ids(flat_z, task_ids=flat_task_ids, state=flat_state)
         resolved_stage_ids = self._resolve_adapter_stage_ids(flat_z, stage_ids=flat_stage_ids)
-        task_emb = self.adapter_task_embedding(resolved_task_ids)
-        stage_emb = self.adapter_stage_embedding(resolved_stage_ids)
-        base_delta = self.adapter(flat_z)
-        cond_delta = self.adapter_condition(torch.cat([flat_z, task_emb, stage_emb], dim=-1))
-        adapted = flat_z + (base_delta + cond_delta) * self.adapter_scale
+        resolved_prev_primitives = self._resolve_adapter_prev_primitives(flat_z, prev_primitives=flat_prev_primitives)
+        aligned_z = self.align_latent(flat_z, task_ids=resolved_task_ids)
+        if self.adapter_use_task_condition:
+            task_emb = self.adapter_task_embedding(resolved_task_ids)
+        else:
+            task_emb = torch.zeros(
+                (aligned_z.shape[0], self.task_embed_dim),
+                device=aligned_z.device,
+                dtype=aligned_z.dtype,
+            )
+        if self.adapter_use_stage_condition:
+            stage_emb = self.adapter_stage_embedding(resolved_stage_ids)
+        else:
+            stage_emb = torch.zeros(
+                (aligned_z.shape[0], self.task_embed_dim),
+                device=aligned_z.device,
+                dtype=aligned_z.dtype,
+            )
+        if self.adapter_use_prev_action_condition:
+            prev_action_emb = self.adapter_prev_action_embedding(resolved_prev_primitives)
+        else:
+            prev_action_emb = torch.zeros(
+                (aligned_z.shape[0], self.action_embed_dim),
+                device=aligned_z.device,
+                dtype=aligned_z.dtype,
+            )
+        adapter_input = torch.cat([aligned_z, task_emb, stage_emb, prev_action_emb], dim=-1)
+        progress_scale = _progressive_scale_from_stage_ids(
+            resolved_stage_ids,
+            self.transition_stage_bins,
+            self.adapter_progressive_min_scale,
+            self.adapter_progressive_max_scale,
+            start_stage=self.adapter_condition_start_stage,
+            end_stage=self.adapter_condition_end_stage,
+            dtype=flat_z.dtype,
+        )
+        observation_mask = self._adapter_observation_mask(resolved_prev_primitives)
+        if self.adapter_phase_split:
+            obs_base_delta = self.adapter(aligned_z)
+            if self.adapter_use_condition_branch:
+                obs_cond_delta = self.adapter_condition(adapter_input)
+            else:
+                obs_cond_delta = torch.zeros_like(obs_base_delta)
+            if not self.adapter_use_condition_branch or self.adapter_mode == "legacy_prevprim":
+                obs_gate = torch.ones_like(obs_cond_delta)
+            elif self.adapter_use_gate:
+                obs_gate = 2.0 * torch.sigmoid(self.adapter_gate(adapter_input))
+            else:
+                obs_gate = torch.ones_like(obs_cond_delta)
+
+            non_obs_base_delta = self.adapter_non_observation(aligned_z)
+            if self.adapter_use_condition_branch:
+                non_obs_cond_delta = self.adapter_non_observation_condition(adapter_input)
+            else:
+                non_obs_cond_delta = torch.zeros_like(non_obs_base_delta)
+            if not self.adapter_use_condition_branch or self.adapter_mode == "legacy_prevprim":
+                non_obs_gate = torch.ones_like(non_obs_cond_delta)
+            elif self.adapter_use_gate:
+                non_obs_gate = 2.0 * torch.sigmoid(self.adapter_non_observation_gate(adapter_input))
+            else:
+                non_obs_gate = torch.ones_like(non_obs_cond_delta)
+
+            obs_residual = (obs_base_delta + obs_gate * obs_cond_delta) * self.adapter_scale
+            non_obs_residual = (non_obs_base_delta + non_obs_gate * non_obs_cond_delta) * self.adapter_scale
+            non_observation_scale_value = (
+                self.adapter_condition_non_observation_scale
+                if self.adapter_condition_observation_only
+                else 1.0
+            )
+            non_observation_scale = torch.full(
+                (aligned_z.shape[0], 1),
+                float(non_observation_scale_value),
+                device=aligned_z.device,
+                dtype=aligned_z.dtype,
+            )
+            residual = torch.where(
+                observation_mask.unsqueeze(-1),
+                obs_residual,
+                non_observation_scale * non_obs_residual,
+            )
+        else:
+            base_delta = self.adapter(aligned_z)
+            if self.adapter_use_condition_branch:
+                cond_delta = self.adapter_condition(adapter_input)
+            else:
+                cond_delta = torch.zeros_like(base_delta)
+            if not self.adapter_use_condition_branch:
+                gate = torch.ones_like(cond_delta)
+            elif self.adapter_mode == "legacy_prevprim":
+                gate = torch.ones_like(cond_delta)
+            elif self.adapter_use_gate:
+                gate = 2.0 * torch.sigmoid(self.adapter_gate(adapter_input))
+            else:
+                gate = torch.ones_like(cond_delta)
+            if self.adapter_condition_observation_only:
+                observation_scale = torch.where(
+                    observation_mask,
+                    torch.ones_like(observation_mask, dtype=aligned_z.dtype),
+                    torch.full_like(observation_mask, self.adapter_condition_non_observation_scale, dtype=aligned_z.dtype),
+                ).unsqueeze(-1)
+                progress_scale = progress_scale * observation_scale
+            residual = (base_delta + gate * cond_delta) * self.adapter_scale
+        stage_scale = self.adapter_stage_scale_vector.index_select(0, resolved_stage_ids).to(dtype=aligned_z.dtype).unsqueeze(-1)
+        progress_scale = progress_scale * stage_scale
+        adapted = aligned_z + progress_scale * residual
         return adapted.view(*original_shape)
 
     def encode_adapted(
@@ -514,6 +1123,7 @@ class BaseTTLAModel(nn.Module, ABC):
             task_ids=task_ids,
             state=state,
             stage_ids=stage_ids,
+            prev_primitives=prev_primitives,
         )
 
     def encode_step_adapted(
@@ -525,7 +1135,16 @@ class BaseTTLAModel(nn.Module, ABC):
         stage_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, Any]:
         z, next_runtime_state = self.encode_step(image, state, runtime_state, task_ids=task_ids)
-        return self.adapt(z, task_ids=task_ids, state=state, stage_ids=stage_ids), next_runtime_state
+        prev_primitive = None
+        if isinstance(runtime_state, dict) and "prev_primitive" in runtime_state:
+            prev_primitive = runtime_state["prev_primitive"]
+        return self.adapt(
+            z,
+            task_ids=task_ids,
+            state=state,
+            stage_ids=stage_ids,
+            prev_primitives=prev_primitive,
+        ), next_runtime_state
 
     def freeze_backbone(self) -> None:
         for name, param in self.named_parameters():
@@ -533,7 +1152,20 @@ class BaseTTLAModel(nn.Module, ABC):
                 name.startswith("adapter.")
                 or name.startswith("adapter_task_embedding.")
                 or name.startswith("adapter_stage_embedding.")
+                or name.startswith("adapter_prev_action_embedding.")
                 or name.startswith("adapter_condition.")
+                or name.startswith("adapter_gate.")
+                or name.startswith("adapter_non_observation.")
+                or name.startswith("adapter_non_observation_condition.")
+                or name.startswith("adapter_non_observation_gate.")
+                or (self.use_transition_action_adapter and name.startswith("transition_action_adapter_embedding."))
+                or (self.use_transition_residual_adapter and name.startswith("transition_residual_adapter."))
+                or (
+                    self.use_transition_residual_adapter
+                    and self.transition_residual_phase_split
+                    and name.startswith("transition_non_observation_residual_adapter.")
+                )
+                or (self.use_policy_residual_adapter and name.startswith("policy_residual_adapter."))
             ):
                 param.requires_grad_(False)
 
@@ -542,10 +1174,47 @@ class BaseTTLAModel(nn.Module, ABC):
             self.adapter.parameters(),
             self.adapter_task_embedding.parameters(),
             self.adapter_stage_embedding.parameters(),
+            self.adapter_prev_action_embedding.parameters(),
             self.adapter_condition.parameters(),
         ]
+        if self.adapter_mode != "legacy_prevprim":
+            modules.append(self.adapter_gate.parameters())
+        if self.adapter_phase_split:
+            modules.extend(
+                [
+                    self.adapter_non_observation.parameters(),
+                    self.adapter_non_observation_condition.parameters(),
+                ]
+            )
+            if self.adapter_mode != "legacy_prevprim":
+                modules.append(self.adapter_non_observation_gate.parameters())
+        if self.use_transition_action_adapter:
+            modules.append(self.transition_action_adapter_embedding.parameters())
+        if self.use_transition_residual_adapter:
+            modules.append(self.transition_residual_adapter.parameters())
+            if self.transition_residual_phase_split:
+                modules.append(self.transition_non_observation_residual_adapter.parameters())
+        if self.use_policy_residual_adapter:
+            modules.append(self.policy_residual_adapter.parameters())
         for params in modules:
             yield from params
+
+    def gate_identity_penalty(self) -> torch.Tensor:
+        penalties: list[torch.Tensor] = []
+        for attr_name in (
+            "adapter_gate",
+            "adapter_non_observation_gate",
+            "feature_adapter_gate",
+            "condition_adapter_gate",
+        ):
+            module = getattr(self, attr_name, None)
+            if module is None:
+                continue
+            for param in module.parameters():
+                penalties.append(param.pow(2).mean())
+        if not penalties:
+            return torch.zeros((), device=next(self.parameters()).device)
+        return torch.stack(penalties).sum()
 
     def init_runtime_state(self, batch_size: int = 1, device: torch.device | None = None) -> Any:
         target_device = device or next(self.parameters()).device
@@ -574,6 +1243,8 @@ class BaseTTLAModel(nn.Module, ABC):
         task_ids: torch.Tensor | None = None,
         state: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        if self.use_policy_residual_adapter and z is not None:
+            logits = logits + self.policy_residual_scale * self.policy_residual_adapter(z)
         prior = self._task_action_prior(task_ids, state)
         if logits.ndim == 2:
             conditioned = logits + prior
@@ -585,10 +1256,20 @@ class BaseTTLAModel(nn.Module, ABC):
                     logits.shape[-1],
                     positive=0.8,
                     negative=-0.8,
+                    primitive_vocabulary=self.primitive_vocabulary,
                 )
             if self.predicted_stage_prior_scale > 0.0 and z is not None:
                 conditioned = conditioned + self.predicted_stage_prior_scale * self._predicted_stage_prior(z)
-            if self.task_hard_mask:
+            if self.stage_hard_mask and state is not None:
+                resolved_task_ids = _resolve_task_ids(task_ids, state, self.task_vocab_size)
+                action_mask = _stage_action_mask(
+                    resolved_task_ids,
+                    state,
+                    conditioned.shape[-1],
+                    primitive_vocabulary=self.primitive_vocabulary,
+                ).to(dtype=conditioned.dtype)
+                conditioned = conditioned.masked_fill(action_mask < 0.5, -1.0e9)
+            elif self.task_hard_mask:
                 action_mask = self._task_action_mask(task_ids, state).to(dtype=conditioned.dtype)
                 conditioned = conditioned.masked_fill(action_mask < 0.5, -1.0e9)
             return conditioned
@@ -603,6 +1284,7 @@ class BaseTTLAModel(nn.Module, ABC):
                         logits.shape[-1],
                         positive=0.8,
                         negative=-0.8,
+                        primitive_vocabulary=self.primitive_vocabulary,
                     ).unsqueeze(1)
                 else:
                     batch, steps, _ = state.shape
@@ -618,6 +1300,7 @@ class BaseTTLAModel(nn.Module, ABC):
                         logits.shape[-1],
                         positive=0.8,
                         negative=-0.8,
+                        primitive_vocabulary=self.primitive_vocabulary,
                     ).view(batch, steps, logits.shape[-1])
                 conditioned = conditioned + self.stage_prior_scale * stage_prior
             if self.predicted_stage_prior_scale > 0.0 and z is not None:
@@ -626,6 +1309,33 @@ class BaseTTLAModel(nn.Module, ABC):
                 else:
                     predicted_prior = self._predicted_stage_prior(z.reshape(-1, z.shape[-1])).view(*z.shape[:-1], -1)
                 conditioned = conditioned + self.predicted_stage_prior_scale * predicted_prior
+            if self.stage_hard_mask and state is not None:
+                if state.ndim == 2:
+                    resolved_task_ids = _resolve_task_ids(task_ids, state, self.task_vocab_size)
+                    action_mask = _stage_action_mask(
+                        resolved_task_ids,
+                        state,
+                        conditioned.shape[-1],
+                        primitive_vocabulary=self.primitive_vocabulary,
+                    ).to(dtype=conditioned.dtype)
+                    conditioned = conditioned.masked_fill(action_mask.unsqueeze(1) < 0.5, -1.0e9)
+                    return conditioned
+                if state.ndim == 3:
+                    batch, steps, _ = state.shape
+                    flat_state = state.reshape(batch * steps, state.shape[-1])
+                    if task_ids is None:
+                        flat_task_ids = None
+                    else:
+                        flat_task_ids = task_ids.unsqueeze(1).expand(batch, steps).reshape(-1)
+                    resolved_task_ids = _resolve_task_ids(flat_task_ids, flat_state, self.task_vocab_size)
+                    action_mask = _stage_action_mask(
+                        resolved_task_ids,
+                        flat_state,
+                        conditioned.shape[-1],
+                        primitive_vocabulary=self.primitive_vocabulary,
+                    ).to(dtype=conditioned.dtype)
+                    conditioned = conditioned.masked_fill(action_mask.view(batch, steps, conditioned.shape[-1]) < 0.5, -1.0e9)
+                    return conditioned
             if self.task_hard_mask:
                 if state is not None:
                     action_mask = self._task_action_mask(task_ids, state).to(dtype=conditioned.dtype)
@@ -684,6 +1394,23 @@ class BaseTTLAModel(nn.Module, ABC):
     def compute_policy_loss(self, batch: dict[str, torch.Tensor], z: torch.Tensor) -> torch.Tensor:
         logits = self.condition_policy_logits(self.policy_logits(z), z=z, task_ids=batch.get("task"), state=batch.get("state"))
         return F.cross_entropy(logits, batch["primitive_id"])
+
+    def inverse_logits(self, z: torch.Tensor, next_z: torch.Tensor) -> torch.Tensor:
+        delta = next_z - z
+        return self.inverse_head(torch.cat([z, delta], dim=-1))
+
+    def compute_inverse_loss(
+        self,
+        batch: dict[str, torch.Tensor],
+        z: torch.Tensor,
+        next_z: torch.Tensor,
+        *,
+        weights: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        losses = F.cross_entropy(self.inverse_logits(z, next_z), batch["primitive_id"], reduction="none")
+        if weights is None:
+            return losses.mean()
+        return weights.mul(losses).mean()
 
     def compute_stage_loss(self, batch: dict[str, torch.Tensor], z: torch.Tensor) -> torch.Tensor:
         if "stage_id" not in batch:
@@ -784,6 +1511,8 @@ class RecurrentTTLAModel(BaseTTLAModel):
         use_prev_action: bool = False,
         runtime_horizon: int | None = None,
         sequence_final_weight: float = 1.0,
+        recurrent_adapter_use_feature: bool = True,
+        recurrent_adapter_use_latent: bool = True,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -793,6 +1522,8 @@ class RecurrentTTLAModel(BaseTTLAModel):
         self.use_prev_action = use_prev_action
         self.runtime_horizon = runtime_horizon or history_len
         self.sequence_final_weight = sequence_final_weight
+        self.recurrent_adapter_use_feature = recurrent_adapter_use_feature
+        self.recurrent_adapter_use_latent = recurrent_adapter_use_latent
         self.image_encoder = ImageEncoder(self.hidden_dim)
         self.state_encoder = nn.Sequential(
             nn.Linear(self.proprio_dim, self.hidden_dim),
@@ -822,16 +1553,30 @@ class RecurrentTTLAModel(BaseTTLAModel):
         )
         self.feature_adapter_task_embedding = nn.Embedding(self.task_vocab_size, self.task_embed_dim)
         self.feature_adapter_progress_embedding = nn.Embedding(self.transition_stage_bins, self.task_embed_dim)
+        self.feature_adapter_prev_action_embedding = nn.Embedding(self.action_dim + 1, self.action_embed_dim)
         self.feature_adapter_condition = nn.Sequential(
-            nn.Linear(self.hidden_dim + self.task_embed_dim * 2, kwargs.get("adapter_hidden_dim", 64)),
+            nn.Linear(
+                self.hidden_dim + self.task_embed_dim * 2 + self.action_embed_dim,
+                kwargs.get("adapter_hidden_dim", 64),
+            ),
             nn.ReLU(),
             nn.Linear(kwargs.get("adapter_hidden_dim", 64), self.hidden_dim),
             nn.Tanh(),
+        )
+        self.feature_adapter_gate = nn.Sequential(
+            nn.Linear(
+                self.hidden_dim + self.task_embed_dim * 2 + self.action_embed_dim,
+                kwargs.get("adapter_hidden_dim", 64),
+            ),
+            nn.ReLU(),
+            nn.Linear(kwargs.get("adapter_hidden_dim", 64), self.hidden_dim),
         )
         nn.init.zeros_(self.feature_adapter[2].weight)
         nn.init.zeros_(self.feature_adapter[2].bias)
         nn.init.zeros_(self.feature_adapter_condition[2].weight)
         nn.init.zeros_(self.feature_adapter_condition[2].bias)
+        nn.init.zeros_(self.feature_adapter_gate[2].weight)
+        nn.init.zeros_(self.feature_adapter_gate[2].bias)
 
     def _feature_step(
         self,
@@ -873,14 +1618,32 @@ class RecurrentTTLAModel(BaseTTLAModel):
         feature: torch.Tensor,
         state: torch.Tensor,
         task_ids: torch.Tensor | None = None,
+        prev_primitives: torch.Tensor | None = None,
     ) -> torch.Tensor:
         resolved_task_ids = _resolve_task_ids(task_ids, state, self.task_vocab_size).to(device=feature.device)
         progress_bins = _extract_progress_bins(state, self.transition_stage_bins).to(device=feature.device)
         task_emb = self.feature_adapter_task_embedding(resolved_task_ids)
         progress_emb = self.feature_adapter_progress_embedding(progress_bins)
+        prev_ids = self._resolve_adapter_prev_primitives(feature, prev_primitives=prev_primitives)
+        prev_emb = self.feature_adapter_prev_action_embedding(prev_ids)
+        adapter_input = torch.cat([feature, task_emb, progress_emb, prev_emb], dim=-1)
         base_delta = self.feature_adapter(feature)
-        cond_delta = self.feature_adapter_condition(torch.cat([feature, task_emb, progress_emb], dim=-1))
-        return feature + (base_delta + cond_delta) * self.adapter_scale
+        cond_delta = self.feature_adapter_condition(adapter_input)
+        if self.adapter_mode == "legacy_prevprim":
+            gate = torch.ones_like(cond_delta)
+        else:
+            gate = 2.0 * torch.sigmoid(self.feature_adapter_gate(adapter_input))
+        progress_scale = _progressive_scale_from_stage_ids(
+            progress_bins,
+            self.transition_stage_bins,
+            self.adapter_progressive_min_scale,
+            self.adapter_progressive_max_scale,
+            start_stage=self.adapter_condition_start_stage,
+            end_stage=self.adapter_condition_end_stage,
+            dtype=feature.dtype,
+        )
+        residual = (base_delta + gate * cond_delta) * self.adapter_scale
+        return feature + progress_scale * residual
 
     def _encode_step_internal(
         self,
@@ -899,7 +1662,7 @@ class RecurrentTTLAModel(BaseTTLAModel):
             hidden_state = torch.zeros((1, image.shape[0], self.latent_dim), device=image.device, dtype=image.dtype)
         feature = self._feature_step(image, state, task_ids=task_ids, prev_primitives=prev_primitive)
         if use_adapter:
-            feature = self._adapt_feature(feature, state, task_ids=task_ids)
+            feature = self._adapt_feature(feature, state, task_ids=task_ids, prev_primitives=prev_primitive)
         feature = feature.unsqueeze(1)
         output, next_hidden_state = self.gru(feature, hidden_state)
         z = output[:, -1]
@@ -926,8 +1689,21 @@ class RecurrentTTLAModel(BaseTTLAModel):
         runtime_state: Any = None,
         task_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, Any]:
-        z, next_runtime_state = self._encode_step_internal(image, state, runtime_state, task_ids=task_ids, use_adapter=True)
-        adapted_z = self.adapt(z, task_ids=task_ids, state=state)
+        z, next_runtime_state = self._encode_step_internal(
+            image,
+            state,
+            runtime_state,
+            task_ids=task_ids,
+            use_adapter=self.recurrent_adapter_use_feature,
+        )
+        prev_primitive = None
+        if runtime_state is not None:
+            prev_primitive = runtime_state.get("prev_primitive")
+        adapted_z = (
+            self.adapt(z, task_ids=task_ids, state=state, prev_primitives=prev_primitive)
+            if self.recurrent_adapter_use_latent
+            else z
+        )
         return adapted_z, next_runtime_state
 
     def encode(
@@ -937,7 +1713,10 @@ class RecurrentTTLAModel(BaseTTLAModel):
         task_ids: torch.Tensor | None = None,
         prev_primitives: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        z, _ = self.encode_step(image, state, None, task_ids=task_ids)
+        runtime_state = self.init_runtime_state(batch_size=image.shape[0], device=image.device)
+        if prev_primitives is not None:
+            runtime_state["prev_primitive"] = prev_primitives.long().clamp(0, self.action_dim)
+        z, _ = self.encode_step(image, state, runtime_state, task_ids=task_ids)
         return z
 
     def encode_adapted(
@@ -947,7 +1726,10 @@ class RecurrentTTLAModel(BaseTTLAModel):
         task_ids: torch.Tensor | None = None,
         prev_primitives: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        z, _ = self.encode_step_adapted(image, state, None, task_ids=task_ids)
+        runtime_state = self.init_runtime_state(batch_size=image.shape[0], device=image.device)
+        if prev_primitives is not None:
+            runtime_state["prev_primitive"] = prev_primitives.long().clamp(0, self.action_dim)
+        z, _ = self.encode_step_adapted(image, state, runtime_state, task_ids=task_ids)
         return z
 
     def encode_history(
@@ -985,23 +1767,38 @@ class RecurrentTTLAModel(BaseTTLAModel):
             task_ids=expanded_task_ids,
             prev_primitives=flat_prev_primitives,
         )
-        if use_adapter:
-            fused = self._adapt_feature(fused, flat_states, task_ids=expanded_task_ids)
+        if use_adapter and self.recurrent_adapter_use_feature:
+            fused = self._adapt_feature(
+                fused,
+                flat_states,
+                task_ids=expanded_task_ids,
+                prev_primitives=flat_prev_primitives,
+            )
         fused = fused.reshape(batch_size, history_len, self.hidden_dim)
         output, _ = self.gru(fused)
         if return_sequence:
-            return self.adapt(output, task_ids=task_ids, state=states) if use_adapter else output
+            return (
+                self.adapt(output, task_ids=task_ids, state=states, prev_primitives=prev_primitives)
+                if use_adapter and self.recurrent_adapter_use_latent
+                else output
+            )
         if mask is None:
             z = output[:, -1]
-            return self.adapt(z, task_ids=task_ids, state=states[:, -1]) if use_adapter else z
+            current_prev = None if prev_primitives is None else prev_primitives[:, -1]
+            return (
+                self.adapt(z, task_ids=task_ids, state=states[:, -1], prev_primitives=current_prev)
+                if use_adapter and self.recurrent_adapter_use_latent
+                else z
+            )
         lengths = mask.long().sum(dim=1).clamp_min(1)
         gather_idx = (lengths - 1).view(-1, 1, 1).expand(-1, 1, output.shape[-1])
         z = output.gather(1, gather_idx).squeeze(1)
-        if not use_adapter:
+        if not use_adapter or not self.recurrent_adapter_use_latent:
             return z
         batch_idx = torch.arange(states.shape[0], device=states.device)
         final_states = states[batch_idx, lengths - 1]
-        return self.adapt(z, task_ids=task_ids, state=final_states)
+        final_prev = None if prev_primitives is None else prev_primitives[batch_idx, lengths - 1]
+        return self.adapt(z, task_ids=task_ids, state=final_states, prev_primitives=final_prev)
 
     def compute_latents(self, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         if "history_images" not in batch:
@@ -1105,30 +1902,83 @@ class RecurrentTTLAModel(BaseTTLAModel):
         return primitive, next_runtime_state, z_used
 
     def freeze_backbone(self) -> None:
+        allowed_prefixes = {
+            "adapter.",
+            "adapter_task_embedding.",
+            "adapter_stage_embedding.",
+            "adapter_condition.",
+            "adapter_non_observation.",
+            "adapter_non_observation_condition.",
+        }
+        if self.adapter_mode != "legacy_prevprim":
+            allowed_prefixes.add("adapter_gate.")
+            allowed_prefixes.add("adapter_non_observation_gate.")
+        if self.recurrent_adapter_use_feature:
+            allowed_prefixes.update(
+                {
+                    "feature_adapter.",
+                    "feature_adapter_task_embedding.",
+                    "feature_adapter_progress_embedding.",
+                    "feature_adapter_prev_action_embedding.",
+                    "feature_adapter_condition.",
+                }
+            )
+            if self.adapter_mode != "legacy_prevprim":
+                allowed_prefixes.add("feature_adapter_gate.")
+        if self.use_transition_action_adapter:
+            allowed_prefixes.add("transition_action_adapter_embedding.")
+        if self.use_transition_residual_adapter:
+            allowed_prefixes.add("transition_residual_adapter.")
+            if self.transition_residual_phase_split:
+                allowed_prefixes.add("transition_non_observation_residual_adapter.")
+        if self.use_policy_residual_adapter:
+            allowed_prefixes.add("policy_residual_adapter.")
         for name, param in self.named_parameters():
-            if not (
-                name.startswith("adapter.")
-                or name.startswith("adapter_task_embedding.")
-                or name.startswith("adapter_stage_embedding.")
-                or name.startswith("adapter_condition.")
-                or name.startswith("feature_adapter.")
-                or name.startswith("feature_adapter_task_embedding.")
-                or name.startswith("feature_adapter_progress_embedding.")
-                or name.startswith("feature_adapter_condition.")
-            ):
+            if not any(name.startswith(prefix) for prefix in allowed_prefixes):
                 param.requires_grad_(False)
 
     def adapter_parameters(self):
-        modules = [
-            self.adapter.parameters(),
-            self.adapter_task_embedding.parameters(),
-            self.adapter_stage_embedding.parameters(),
-            self.adapter_condition.parameters(),
-            self.feature_adapter.parameters(),
-            self.feature_adapter_task_embedding.parameters(),
-            self.feature_adapter_progress_embedding.parameters(),
-            self.feature_adapter_condition.parameters(),
-        ]
+        modules = []
+        if self.recurrent_adapter_use_latent:
+            modules.extend(
+                [
+                    self.adapter.parameters(),
+                    self.adapter_task_embedding.parameters(),
+                    self.adapter_stage_embedding.parameters(),
+                    self.adapter_condition.parameters(),
+                ]
+            )
+            if self.adapter_mode != "legacy_prevprim":
+                modules.append(self.adapter_gate.parameters())
+            if self.adapter_phase_split:
+                modules.extend(
+                    [
+                        self.adapter_non_observation.parameters(),
+                        self.adapter_non_observation_condition.parameters(),
+                    ]
+                )
+                if self.adapter_mode != "legacy_prevprim":
+                    modules.append(self.adapter_non_observation_gate.parameters())
+        if self.recurrent_adapter_use_feature:
+            modules.extend(
+                [
+                    self.feature_adapter.parameters(),
+                    self.feature_adapter_task_embedding.parameters(),
+                    self.feature_adapter_progress_embedding.parameters(),
+                    self.feature_adapter_prev_action_embedding.parameters(),
+                    self.feature_adapter_condition.parameters(),
+                ]
+            )
+            if self.adapter_mode != "legacy_prevprim":
+                modules.append(self.feature_adapter_gate.parameters())
+        if self.use_transition_action_adapter:
+            modules.append(self.transition_action_adapter_embedding.parameters())
+        if self.use_transition_residual_adapter:
+            modules.append(self.transition_residual_adapter.parameters())
+            if self.transition_residual_phase_split:
+                modules.append(self.transition_non_observation_residual_adapter.parameters())
+        if self.use_policy_residual_adapter:
+            modules.append(self.policy_residual_adapter.parameters())
         for params in modules:
             yield from params
 
@@ -1387,11 +2237,29 @@ class LanguageConditionedTTLAModel(BaseTTLAModel):
             nn.Linear(self.hidden_dim, self.hidden_dim),
             nn.ReLU(),
         )
-        self.register_buffer("prompt_embedding_table", _fixed_prompt_embedding_table(task_vocab_size, language_dim))
-        self.register_buffer("action_hint_embedding_table", _fixed_task_action_hint_table(task_vocab_size, language_dim))
+        self.register_buffer(
+            "prompt_embedding_table",
+            _fixed_prompt_embedding_table(
+                task_vocab_size,
+                language_dim,
+                primitive_vocabulary=self.primitive_vocabulary,
+            ),
+        )
+        self.register_buffer(
+            "action_hint_embedding_table",
+            _fixed_task_action_hint_table(
+                task_vocab_size,
+                language_dim,
+                primitive_vocabulary=self.primitive_vocabulary,
+            ),
+        )
         self.register_buffer(
             "primitive_prompt_embedding_table",
-            _fixed_primitive_text_embedding_table(self.action_dim, language_dim),
+            _fixed_primitive_text_embedding_table(
+                self.action_dim,
+                language_dim,
+                primitive_vocabulary=self.primitive_vocabulary,
+            ),
         )
         self.language_encoder = nn.Sequential(
             nn.Linear(language_dim * 2, language_dim),
@@ -1516,10 +2384,17 @@ class DiffusionPrimitiveTTLAModel(BaseTTLAModel):
             nn.Linear(kwargs.get("adapter_hidden_dim", 64), self.latent_dim),
             nn.Tanh(),
         )
+        self.condition_adapter_gate = nn.Sequential(
+            nn.Linear(self.latent_dim + self.task_embed_dim * 2, kwargs.get("adapter_hidden_dim", 64)),
+            nn.ReLU(),
+            nn.Linear(kwargs.get("adapter_hidden_dim", 64), self.latent_dim),
+        )
         nn.init.zeros_(self.condition_adapter[2].weight)
         nn.init.zeros_(self.condition_adapter[2].bias)
         nn.init.zeros_(self.condition_adapter_condition[2].weight)
         nn.init.zeros_(self.condition_adapter_condition[2].bias)
+        nn.init.zeros_(self.condition_adapter_gate[2].weight)
+        nn.init.zeros_(self.condition_adapter_gate[2].bias)
 
     def encode(
         self,
@@ -1555,9 +2430,24 @@ class DiffusionPrimitiveTTLAModel(BaseTTLAModel):
         resolved_stage_ids = self._resolve_adapter_stage_ids(z, stage_ids=stage_ids)
         task_emb = self.condition_adapter_task_embedding(resolved_task_ids)
         stage_emb = self.condition_adapter_stage_embedding(resolved_stage_ids)
+        adapter_input = torch.cat([z, task_emb, stage_emb], dim=-1)
         base_delta = self.condition_adapter(z)
-        cond_delta = self.condition_adapter_condition(torch.cat([z, task_emb, stage_emb], dim=-1))
-        return z + (base_delta + cond_delta) * self.adapter_scale
+        cond_delta = self.condition_adapter_condition(adapter_input)
+        if self.adapter_mode == "legacy_prevprim":
+            gate = torch.ones_like(cond_delta)
+        else:
+            gate = 2.0 * torch.sigmoid(self.condition_adapter_gate(adapter_input))
+        progress_scale = _progressive_scale_from_stage_ids(
+            resolved_stage_ids,
+            self.transition_stage_bins,
+            self.adapter_progressive_min_scale,
+            self.adapter_progressive_max_scale,
+            start_stage=self.adapter_condition_start_stage,
+            end_stage=self.adapter_condition_end_stage,
+            dtype=z.dtype,
+        )
+        residual = (base_delta + gate * cond_delta) * self.adapter_scale
+        return z + progress_scale * residual
 
     def _action_logits_from_embed(self, action_embed: torch.Tensor) -> torch.Tensor:
         return action_embed @ self.action_codebook.weight.t()
@@ -1644,10 +2534,23 @@ class DiffusionPrimitiveTTLAModel(BaseTTLAModel):
                 or name.startswith("adapter_task_embedding.")
                 or name.startswith("adapter_stage_embedding.")
                 or name.startswith("adapter_condition.")
+                or name.startswith("adapter_gate.")
+                or name.startswith("adapter_non_observation.")
+                or name.startswith("adapter_non_observation_condition.")
+                or name.startswith("adapter_non_observation_gate.")
                 or name.startswith("condition_adapter.")
                 or name.startswith("condition_adapter_task_embedding.")
                 or name.startswith("condition_adapter_stage_embedding.")
                 or name.startswith("condition_adapter_condition.")
+                or name.startswith("condition_adapter_gate.")
+                or (self.use_transition_action_adapter and name.startswith("transition_action_adapter_embedding."))
+                or (self.use_transition_residual_adapter and name.startswith("transition_residual_adapter."))
+                or (
+                    self.use_transition_residual_adapter
+                    and self.transition_residual_phase_split
+                    and name.startswith("transition_non_observation_residual_adapter.")
+                )
+                or (self.use_policy_residual_adapter and name.startswith("policy_residual_adapter."))
             ):
                 param.requires_grad_(False)
 
@@ -1662,6 +2565,29 @@ class DiffusionPrimitiveTTLAModel(BaseTTLAModel):
             self.condition_adapter_stage_embedding.parameters(),
             self.condition_adapter_condition.parameters(),
         ]
+        if self.adapter_phase_split:
+            modules.extend(
+                [
+                    self.adapter_non_observation.parameters(),
+                    self.adapter_non_observation_condition.parameters(),
+                ]
+            )
+        if self.adapter_mode != "legacy_prevprim":
+            modules.extend(
+                [
+                    self.adapter_gate.parameters(),
+                    self.adapter_non_observation_gate.parameters(),
+                    self.condition_adapter_gate.parameters(),
+                ]
+            )
+        if self.use_transition_action_adapter:
+            modules.append(self.transition_action_adapter_embedding.parameters())
+        if self.use_transition_residual_adapter:
+            modules.append(self.transition_residual_adapter.parameters())
+            if self.transition_residual_phase_split:
+                modules.append(self.transition_non_observation_residual_adapter.parameters())
+        if self.use_policy_residual_adapter:
+            modules.append(self.policy_residual_adapter.parameters())
         for params in modules:
             yield from params
 

@@ -9,7 +9,7 @@ camera:
   height: 480
 
 runtime:
-  image_size: 84
+  image_size: 224
   max_steps: 12
   probe_steps: 4
   log_dir: data/raw/real_eval

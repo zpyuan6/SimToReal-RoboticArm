@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from ..sim.skills import PRIMITIVE_VOCAB_LEGACY, remap_primitive_id
 from ..sim.task_defs import supervision_stage_id
 
 
@@ -15,11 +16,19 @@ def _load_payload(path: str | Path) -> dict[str, np.ndarray]:
 
 
 class TrajectoryDataset(Dataset):
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY) -> None:
         payload = _load_payload(path)
+        self.primitive_vocabulary = primitive_vocabulary
         self.images = payload["images"]
         self.states = payload["states"]
-        self.primitive_ids = payload["primitive_ids"]
+        raw_primitive_ids = payload["primitive_ids"].astype(np.int64)
+        if primitive_vocabulary == PRIMITIVE_VOCAB_LEGACY:
+            self.primitive_ids = raw_primitive_ids
+        else:
+            self.primitive_ids = np.asarray(
+                [remap_primitive_id(int(primitive_id), primitive_vocabulary) for primitive_id in raw_primitive_ids],
+                dtype=np.int64,
+            )
         self.next_images = payload["next_images"]
         self.next_states = payload["next_states"]
         self.tasks = payload["tasks"]
@@ -28,11 +37,18 @@ class TrajectoryDataset(Dataset):
         self.episode_ids = payload.get("episode_ids", np.arange(len(self.primitive_ids), dtype=np.int64))
         self.step_ids = payload.get("step_ids", np.zeros(len(self.primitive_ids), dtype=np.int64))
         self._start_token = int(self.primitive_ids.max()) + 1 if len(self.primitive_ids) > 0 else 0
-        if "stage_ids" in payload:
+        if "stage_ids" in payload and primitive_vocabulary == PRIMITIVE_VOCAB_LEGACY:
             self.stage_ids = payload["stage_ids"].astype(np.int64)
         else:
             self.stage_ids = np.asarray(
-                [supervision_stage_id(int(task_id), int(primitive_id)) for task_id, primitive_id in zip(self.tasks, self.primitive_ids)],
+                [
+                    supervision_stage_id(
+                        int(task_id),
+                        int(primitive_id),
+                        primitive_vocabulary=primitive_vocabulary,
+                    )
+                    for task_id, primitive_id in zip(self.tasks, self.primitive_ids)
+                ],
                 dtype=np.int64,
             )
         self.prev_primitive_ids = np.full(len(self.primitive_ids), self._start_token, dtype=np.int64)
@@ -70,8 +86,14 @@ class TrajectoryDataset(Dataset):
 
 
 class HistoryTrajectoryDataset(TrajectoryDataset):
-    def __init__(self, path: str | Path, history_len: int = 4, chunk_size: int = 3) -> None:
-        super().__init__(path)
+    def __init__(
+        self,
+        path: str | Path,
+        history_len: int = 4,
+        chunk_size: int = 3,
+        primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY,
+    ) -> None:
+        super().__init__(path, primitive_vocabulary=primitive_vocabulary)
         self.history_len = history_len
         self.chunk_size = chunk_size
         self._episode_to_indices: dict[int, np.ndarray] = {}
@@ -143,13 +165,24 @@ class HistoryTrajectoryDataset(TrajectoryDataset):
         mask = np.zeros(self.chunk_size, dtype=np.float32)
         current_index = indices[pos]
         current_task = int(self.tasks[current_index])
-        current_stage = supervision_stage_id(current_task, int(self.primitive_ids[current_index]))
+        current_stage = supervision_stage_id(
+            current_task,
+            int(self.primitive_ids[current_index]),
+            primitive_vocabulary=self.primitive_vocabulary,
+        )
         for offset in range(self.chunk_size):
             next_pos = pos + offset
             if next_pos >= len(indices):
                 break
             next_index = indices[next_pos]
-            if supervision_stage_id(current_task, int(self.primitive_ids[next_index])) != current_stage:
+            if (
+                supervision_stage_id(
+                    current_task,
+                    int(self.primitive_ids[next_index]),
+                    primitive_vocabulary=self.primitive_vocabulary,
+                )
+                != current_stage
+            ):
                 break
             values[offset] = self.primitive_ids[next_index]
             mask[offset] = 1.0
@@ -182,11 +215,19 @@ class HistoryTrajectoryDataset(TrajectoryDataset):
 
 
 class RealCalibrationDataset(Dataset):
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY) -> None:
         payload = _load_payload(path)
+        self.primitive_vocabulary = primitive_vocabulary
         self.images = payload["images"]
         self.states = payload["states"]
-        self.primitive_ids = payload["primitive_ids"]
+        raw_primitive_ids = payload["primitive_ids"].astype(np.int64)
+        if primitive_vocabulary == PRIMITIVE_VOCAB_LEGACY:
+            self.primitive_ids = raw_primitive_ids
+        else:
+            self.primitive_ids = np.asarray(
+                [remap_primitive_id(int(primitive_id), primitive_vocabulary) for primitive_id in raw_primitive_ids],
+                dtype=np.int64,
+            )
         self.next_images = payload["next_images"]
         self.next_states = payload["next_states"]
         self.episode_ids = payload.get("episode_ids", np.arange(len(self.primitive_ids), dtype=np.int64))
@@ -198,11 +239,18 @@ class RealCalibrationDataset(Dataset):
             self.tasks = np.rint(self.states[:, -2]).astype(np.int64)
         else:
             self.tasks = np.zeros(len(self.primitive_ids), dtype=np.int64)
-        if "stage_ids" in payload:
+        if "stage_ids" in payload and primitive_vocabulary == PRIMITIVE_VOCAB_LEGACY:
             self.stage_ids = payload["stage_ids"].astype(np.int64)
         else:
             self.stage_ids = np.asarray(
-                [supervision_stage_id(int(task_id), int(primitive_id)) for task_id, primitive_id in zip(self.tasks, self.primitive_ids)],
+                [
+                    supervision_stage_id(
+                        int(task_id),
+                        int(primitive_id),
+                        primitive_vocabulary=primitive_vocabulary,
+                    )
+                    for task_id, primitive_id in zip(self.tasks, self.primitive_ids)
+                ],
                 dtype=np.int64,
             )
         self.prev_primitive_ids = np.full(len(self.primitive_ids), self._start_token, dtype=np.int64)

@@ -11,6 +11,19 @@ import numpy as np
 from .context import ContextConfig, context_vector, sample_context
 from .skills import (
     ABORT_ID,
+    COMPACT_ABORT_ID,
+    COMPACT_APPROACH_ID,
+    COMPACT_CONFIRM_ID,
+    COMPACT_GRASP_ID,
+    COMPACT_HOLD_ID,
+    COMPACT_LIFT_ID,
+    COMPACT_OBS_CENTER_ID,
+    COMPACT_OBS_LEFT_ID,
+    COMPACT_PREGRASP_ID,
+    COMPACT_OBS_RIGHT_ID,
+    COMPACT_PLACE_ID,
+    COMPACT_RETREAT_ID,
+    COMPACT_TRANSPORT_ID,
     APPROACH_COARSE_ID,
     APPROACH_FINE_ID,
     CARRY_QPOS,
@@ -31,12 +44,13 @@ from .skills import (
     RETREAT_ID,
     TRANSPORT_TO_DROPZONE_ID,
     VERIFY_TARGET_ID,
-    allowed_primitives,
     observe_pose,
     primitive_action,
     primitive_name,
+    PRIMITIVE_VOCAB_COMPACT,
+    PRIMITIVE_VOCAB_LEGACY,
 )
-from .task_defs import TASK_TO_ID, task_spec
+from .task_defs import TASK_TO_ID, task_allowed_primitives, task_spec
 
 
 @dataclass
@@ -54,12 +68,15 @@ class Transition:
 class RoArmSimEnv:
     def __init__(self, sim_cfg: dict, seed: int = 0) -> None:
         self.cfg = sim_cfg
+        self.primitive_vocabulary = str(self.cfg.get("primitive_vocabulary", PRIMITIVE_VOCAB_LEGACY)).lower()
         self.rng = np.random.default_rng(seed)
         xml_path = Path(__file__).resolve().parent / "mjcf" / "roarm_simplified.xml"
         self.model = mujoco.MjModel.from_xml_path(str(xml_path))
         self.data = mujoco.MjData(self.model)
         self.obs_renderer = mujoco.Renderer(self.model, height=self.cfg["image_size"], width=self.cfg["image_size"])
-        self.debug_size = max(256, int(self.cfg["image_size"]) * 4)
+        # Keep the debug renderer large enough for inspection without exceeding
+        # the default MuJoCo offscreen framebuffer configured in the XML.
+        self.debug_size = min(512, max(256, int(self.cfg["image_size"]) * 2))
         self.debug_renderer = mujoco.Renderer(self.model, height=self.debug_size, width=self.debug_size)
         self._cache_contact_ids()
         self.context_cfg = ContextConfig(**sim_cfg["context"])
@@ -71,11 +88,14 @@ class RoArmSimEnv:
         self.verified = False
         self.placed = False
         self.lifted = False
-        self.last_primitive = OBS_CENTER_ID
+        self.last_primitive = COMPACT_OBS_CENTER_ID if self.primitive_vocabulary == PRIMITIVE_VOCAB_COMPACT else OBS_CENTER_ID
         self.release_counter = 0
         self.recent_ear_contact = 0
         self.active_grasp_local_offset = np.asarray([-0.028, -0.003, -0.069], dtype=np.float64)
         self.reset()
+
+    def _scaled_px(self, reference_px_at_84: float) -> float:
+        return float(reference_px_at_84 * (float(self.cfg["image_size"]) / 84.0))
 
     def _cache_contact_ids(self) -> None:
         self.gripper_contact_geom_ids = {
@@ -94,13 +114,14 @@ class RoArmSimEnv:
         if task_name is not None:
             self.task_name = task_name
         self.context = context if context is not None else sample_context(self.context_cfg, self.rng)
-        self._task_adjust_context()
+        if bool(self.cfg.get("task_context_rescaling", False)):
+            self._task_adjust_context()
         self.step_idx = 0
         self.object_attached = False
         self.verified = False
         self.placed = False
         self.lifted = False
-        self.last_primitive = OBS_CENTER_ID
+        self.last_primitive = COMPACT_OBS_CENTER_ID if self.primitive_vocabulary == PRIMITIVE_VOCAB_COMPACT else OBS_CENTER_ID
         self.release_counter = 0
         self.recent_ear_contact = 0
         self.active_grasp_local_offset = np.asarray([-0.028, -0.003, -0.069], dtype=np.float64)
@@ -338,12 +359,16 @@ class RoArmSimEnv:
         return bool(np.all(np.abs(target_xy - drop_xy) <= half_extent))
 
     def pregrasp_ready(self) -> bool:
-        return self.visibility_score() > 0.11 and self.center_error_px() < 20.0 and self.ee_target_distance() < 0.17
+        return (
+            self.visibility_score() > 0.11
+            and self.center_error_px() < self._scaled_px(20.0)
+            and self.ee_target_distance() < 0.17
+        )
 
     def approach_success_ready(self) -> bool:
         return (
             self.visibility_score() > 0.13
-            and self.center_error_px() < 19.0
+            and self.center_error_px() < self._scaled_px(19.0)
             and self.ee_target_distance() < 0.160
         )
 
@@ -351,7 +376,7 @@ class RoArmSimEnv:
         if self.task_name == "level1_verify":
             return int(self.verified)
         if self.task_name == "level2_approach":
-            return int(self.verified and self.approach_success_ready())
+            return int(self.approach_success_ready())
         return int(self.placed)
 
     def _apply_target_pose(self, target_qpos: np.ndarray, dwell: int = 1) -> None:
@@ -439,7 +464,7 @@ class RoArmSimEnv:
             self._apply_target_pose(self.data.ctrl[:6], dwell=1)
             vis_scores.append(self.visibility_score())
             center_scores.append(self.center_error_px())
-        self.verified = bool(np.mean(vis_scores) > 0.11 and np.mean(center_scores) < 25.0)
+        self.verified = bool(np.mean(vis_scores) > 0.11 and np.mean(center_scores) < self._scaled_px(38.0))
 
     def _execute_prealign(self) -> None:
         self._apply_target_pose(self._prealign_pose(self._target_position()), dwell=2)
@@ -543,6 +568,12 @@ class RoArmSimEnv:
         self._apply_target_pose(q_target, dwell=2)
 
     def _execute_pregrasp_servo(self) -> None:
+        if (
+            self.visibility_score() < 0.10
+            or self.center_error_px() > self._scaled_px(40.0)
+            or self.ee_target_distance() > 0.14
+        ):
+            self._apply_target_pose(self._prealign_pose(self._target_position()), dwell=1)
         self._apply_target_pose(self._pregrasp_anchor_pose(self._target_grasp_position()), dwell=3)
         saw_contact = False
         for _ in range(36):
@@ -702,6 +733,41 @@ class RoArmSimEnv:
     def _execute_hold(self) -> None:
         self._apply_target_pose(self.data.qpos[:6].copy(), dwell=2)
 
+    def _expand_policy_primitive(self, primitive_id_value: int) -> int:
+        if self.primitive_vocabulary != PRIMITIVE_VOCAB_COMPACT:
+            return int(primitive_id_value)
+        if primitive_id_value == COMPACT_OBS_LEFT_ID:
+            return OBS_LEFT_ID
+        if primitive_id_value == COMPACT_OBS_CENTER_ID:
+            return OBS_CENTER_ID
+        if primitive_id_value == COMPACT_OBS_RIGHT_ID:
+            return OBS_RIGHT_ID
+        if primitive_id_value == COMPACT_CONFIRM_ID:
+            return VERIFY_TARGET_ID
+        if primitive_id_value == COMPACT_APPROACH_ID:
+            if self.center_error_px() > self._scaled_px(24.0):
+                return PREALIGN_GRASP_ID
+            if self.ee_target_distance() > 0.19:
+                return APPROACH_COARSE_ID
+            return APPROACH_FINE_ID
+        if primitive_id_value == COMPACT_PREGRASP_ID:
+            return PREGRASP_SERVO_ID
+        if primitive_id_value == COMPACT_RETREAT_ID:
+            return RETREAT_ID
+        if primitive_id_value == COMPACT_GRASP_ID:
+            return GRASP_EXECUTE_ID
+        if primitive_id_value == COMPACT_LIFT_ID:
+            return LIFT_OBJECT_ID
+        if primitive_id_value == COMPACT_TRANSPORT_ID:
+            return TRANSPORT_TO_DROPZONE_ID
+        if primitive_id_value == COMPACT_PLACE_ID:
+            return PLACE_OBJECT_ID
+        if primitive_id_value == COMPACT_HOLD_ID:
+            return HOLD_POSITION_ID
+        if primitive_id_value == COMPACT_ABORT_ID:
+            return ABORT_ID
+        raise KeyError(primitive_id_value)
+
     def _execute_primitive(self, primitive_id_value: int) -> None:
         if primitive_id_value in (OBS_LEFT_ID, OBS_RIGHT_ID, OBS_CENTER_ID):
             self._execute_observe(primitive_id_value)
@@ -748,16 +814,19 @@ class RoArmSimEnv:
         raise KeyError(primitive_id_value)
 
     def step(self, action: int | dict[str, int] | str) -> tuple[dict[str, np.ndarray], float, bool, dict]:
-        primitive_id_value = primitive_action(action)
-        if primitive_id_value not in allowed_primitives(task_spec(self.task_name).level):
-            primitive_id_value = ABORT_ID
+        primitive_id_value = primitive_action(action, primitive_vocabulary=self.primitive_vocabulary)
+        allowed = task_allowed_primitives(self.task_name, primitive_vocabulary=self.primitive_vocabulary)
+        if primitive_id_value not in allowed:
+            primitive_id_value = COMPACT_ABORT_ID if self.primitive_vocabulary == PRIMITIVE_VOCAB_COMPACT else ABORT_ID
+        executor_primitive_id = self._expand_policy_primitive(primitive_id_value)
         obs = self._observation()
-        self._execute_primitive(primitive_id_value)
+        self._execute_primitive(executor_primitive_id)
         self.step_idx += 1
         self.last_primitive = primitive_id_value
         next_obs = self._observation()
         success = self.task_success()
-        done = bool(success or self.step_idx >= self.cfg["episode_horizon"] or primitive_id_value == ABORT_ID)
+        abort_id = COMPACT_ABORT_ID if self.primitive_vocabulary == PRIMITIVE_VOCAB_COMPACT else ABORT_ID
+        done = bool(success or self.step_idx >= self.cfg["episode_horizon"] or primitive_id_value == abort_id)
         reward = self._reward(success)
         info = {
             "task": self.task_name,
@@ -765,7 +834,9 @@ class RoArmSimEnv:
             "visibility": self.visibility_score(),
             "center_error": self.center_error_px(),
             "primitive_id": primitive_id_value,
-            "primitive_name": primitive_name(primitive_id_value),
+            "primitive_name": primitive_name(primitive_id_value, primitive_vocabulary=self.primitive_vocabulary),
+            "executor_primitive_id": executor_primitive_id,
+            "executor_primitive_name": primitive_name(executor_primitive_id),
             "verified": int(self.verified),
             "grasped": int(self.object_attached),
             "lifted": int(self.lifted),

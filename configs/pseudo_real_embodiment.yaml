@@ -7,19 +7,20 @@ paths:
   checkpoint_dir: results/pseudo_real_embodiment/checkpoints
 
 sim:
-  image_size: 84
+  image_size: 224
   control_dt: 0.02
   action_repeat: 5
   episode_horizon: 32
+  task_context_rescaling: false
   tasks:
     - level1_verify
     - level2_approach
     - level3_pick_place
   context:
-    camera_jitter: 0.040
+    camera_translation_jitter: 0.040
+    camera_rotation_jitter: 0.08
     fov_jitter: 13.0
     light_jitter: 0.15
-    texture_jitter: 0.15
     blur_sigma: 0.35
     noise_std: 0.01
     action_gain_low: 0.58
@@ -99,6 +100,15 @@ adaptation:
   batch_size: 8
   adapter_reg_weight: 0.1
   static_alignment_weight: 1.0
+  warm_start_static_adapter: true
+  source_alignment_weight: 0.35
+  residual_adaptive_adapt_alpha: 8.0
+  residual_adaptive_adapt_gamma: 0.5
+  source_primitive_alignment_weight: 0.12
+  source_delta_alignment_weight: 0.08
+  source_policy_alignment_weight: 0.02
+  source_alignment_temperature: 1.0
+  source_alignment_use_std_norm: true
 
 few_shot:
   lr: 0.00015
@@ -142,10 +152,17 @@ backbone_overrides:
       level3_late_primitive_boost: 2.5
       level3_transport_stage_boost: 2.5
     adaptation:
-      lr: 0.00025
-      epochs: 18
-      adapter_reg_weight: 0.06
+      lr: 0.00022
+      epochs: 20
+      adapter_reg_weight: 0.05
       batch_size: 6
+      adapter_stage_loss_weight: 0.08
+      source_alignment_weight: 0.45
+      residual_adaptive_adapt_alpha: 8.0
+      residual_adaptive_adapt_gamma: 0.5
+      source_primitive_alignment_weight: 0.22
+      source_delta_alignment_weight: 0.15
+      source_policy_alignment_weight: 0.05
   recurrent:
     model:
       history_len: 4
@@ -172,6 +189,8 @@ backbone_overrides:
       epochs: 22
       adapter_reg_weight: 0.05
       batch_size: 6
+      policy_preservation_weight: 0.0
+      policy_preservation_alpha: 5.0
   chunking:
     model:
       history_len: 6
@@ -188,6 +207,8 @@ backbone_overrides:
       lr: 0.00025
       epochs: 14
       adapter_reg_weight: 0.08
+      policy_preservation_weight: 0.0
+      policy_preservation_alpha: 4.5
   language:
     model:
       language_dim: 64
@@ -205,6 +226,8 @@ backbone_overrides:
       lr: 0.00022
       epochs: 16
       adapter_reg_weight: 0.07
+      policy_preservation_weight: 0.0
+      policy_preservation_alpha: 5.0
   diffusion:
     model:
       task_embed_dim: 24
@@ -228,3 +251,5 @@ backbone_overrides:
       epochs: 20
       adapter_reg_weight: 0.14
       batch_size: 6
+      policy_preservation_weight: 0.0
+      policy_preservation_alpha: 4.0

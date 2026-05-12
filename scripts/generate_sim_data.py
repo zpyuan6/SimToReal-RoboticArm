@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from ttla.config import load_config
+from ttla.sim.skills import OBS_CENTER_ID, OBS_LEFT_ID, OBS_RIGHT_ID
 from ttla.sim.task_defs import supervision_stage_id
 from ttla.sim import RoArmSimEnv, ScriptedExpert
 from ttla.utils.io import ensure_dir, save_npz
@@ -34,7 +35,55 @@ def _prepare_level3_episode(env: RoArmSimEnv, episode: int, retries: int = 6) ->
     env.reset(task_name="level3_pick_place")
 
 
+def _prepare_level1_episode(env: RoArmSimEnv, episode: int, retries: int = 4) -> None:
+    modes = ("default", "centered", "verify_ready", "left_observe", "right_observe")
+    target_mode = modes[episode % len(modes)]
+    for _ in range(retries):
+        env.reset(task_name="level1_verify")
+        if target_mode == "default":
+            return
+        if target_mode == "left_observe":
+            env._execute_observe(OBS_LEFT_ID)
+            return
+        if target_mode == "right_observe":
+            env._execute_observe(OBS_RIGHT_ID)
+            return
+        env._execute_observe(OBS_CENTER_ID)
+        if target_mode == "centered":
+            return
+        if env.visibility_score() >= 0.08 and env.center_error_px() <= 24.0:
+            return
+    env.reset(task_name="level1_verify")
+
+
+def _prepare_level2_episode(env: RoArmSimEnv, episode: int, retries: int = 5) -> None:
+    modes = ("default", "prealign", "coarse", "fine", "verify_ready")
+    target_mode = modes[episode % len(modes)]
+    for _ in range(retries):
+        env.reset(task_name="level2_approach")
+        if target_mode == "default":
+            return
+        env._execute_prealign()
+        if target_mode == "prealign":
+            return
+        env._execute_approach(fine=False)
+        if target_mode == "coarse":
+            return
+        env._execute_approach(fine=True)
+        if target_mode == "fine":
+            return
+        if env.visibility_score() >= 0.12 and env.center_error_px() <= 20.0:
+            return
+    env.reset(task_name="level2_approach")
+
+
 def _prepare_episode(env: RoArmSimEnv, task_name: str, episode: int) -> None:
+    if task_name == "level1_verify":
+        _prepare_level1_episode(env, episode)
+        return
+    if task_name == "level2_approach":
+        _prepare_level2_episode(env, episode)
+        return
     if task_name == "level3_pick_place":
         _prepare_level3_episode(env, episode)
         return

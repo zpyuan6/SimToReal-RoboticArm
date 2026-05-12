@@ -7,7 +7,7 @@ paths:
   checkpoint_dir: results/pseudo_real_embodiment_adapterplus/checkpoints
 
 sim:
-  image_size: 84
+  image_size: 224
   control_dt: 0.02
   action_repeat: 5
   episode_horizon: 32

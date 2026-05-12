@@ -7,6 +7,7 @@ import numpy as np
 
 from ttla.config import load_config
 from ttla.sim import RoArmSimEnv, ScriptedExpert
+from ttla.sim.skills import PRIMITIVE_VOCAB_LEGACY
 from ttla.sim.task_defs import supervision_stage_id
 from ttla.utils.io import ensure_dir, save_npz
 
@@ -54,6 +55,7 @@ def collect_split(env: RoArmSimEnv, expert: ScriptedExpert, episodes: int) -> di
     episode_ids = []
     step_ids = []
     task_names = env.cfg["tasks"]
+    primitive_vocabulary = env.cfg.get("primitive_vocabulary", PRIMITIVE_VOCAB_LEGACY)
     for episode in range(episodes):
         task_name = task_names[episode % len(task_names)]
         _prepare_episode(env, task_name, episode)
@@ -71,7 +73,13 @@ def collect_split(env: RoArmSimEnv, expert: ScriptedExpert, episodes: int) -> di
             tasks.append(transition.task_id)
             success.append(transition.success)
             contexts.append(transition.context)
-            stage_ids.append(supervision_stage_id(int(transition.task_id), int(transition.primitive_id)))
+            stage_ids.append(
+                supervision_stage_id(
+                    int(transition.task_id),
+                    int(transition.primitive_id),
+                    primitive_vocabulary=primitive_vocabulary,
+                )
+            )
             episode_ids.append(episode)
             step_ids.append(step_idx)
             step_idx += 1

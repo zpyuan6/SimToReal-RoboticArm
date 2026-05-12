@@ -9,6 +9,7 @@ import torch.nn.functional as F
 
 from ..models import BaseTTLAModel, load_model_state
 from ..sim import RoArmSimEnv
+from ..sim.skills import PRIMITIVE_VOCAB_LEGACY
 from ..sim.task_defs import TASK_TO_ID, supervision_stage_id
 from ..training import build_model
 from .baselines import baseline_overrides
@@ -68,6 +69,7 @@ def _build_recurrent_online_batch(
 ) -> dict[str, torch.Tensor]:
     history_len = int(getattr(model, "history_len", 4))
     start_token = int(model.action_dim)
+    primitive_vocabulary = getattr(model, "primitive_vocabulary", PRIMITIVE_VOCAB_LEGACY)
 
     def _window_tensors(obs_seq: list[dict], primitive_seq: list[int]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         trimmed_obs = obs_seq[-history_len:]
@@ -84,7 +86,7 @@ def _build_recurrent_online_batch(
             states.append(state_t)
             prev_primitives.append(prev_primitive)
         if pad_len > 0:
-            image_shape = images[0].shape if images else torch.Size((3, 84, 84))
+            image_shape = images[0].shape if images else torch.Size((3, 224, 224))
             state_shape = states[0].shape if states else torch.Size((18,))
             pad_images = [torch.zeros(image_shape, device=device) for _ in range(pad_len)]
             pad_states = [torch.zeros(state_shape, device=device) for _ in range(pad_len)]
@@ -103,7 +105,7 @@ def _build_recurrent_online_batch(
 
     current_images, current_states, current_prev, current_mask = _window_tensors(obs_history, executed_primitives)
     next_images, next_states, next_prev, next_mask = _window_tensors(obs_history + [next_obs], executed_primitives + [current_primitive])
-    stage_id = supervision_stage_id(task_id, current_primitive)
+    stage_id = supervision_stage_id(task_id, current_primitive, primitive_vocabulary=primitive_vocabulary)
     return {
         "history_images": current_images.unsqueeze(0),
         "history_states": current_states.unsqueeze(0),
@@ -132,11 +134,12 @@ def _build_single_step_online_batch(
     task_id: int,
     device: torch.device,
     action_dim: int,
+    primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY,
     prev_primitive: int | None = None,
 ) -> dict[str, torch.Tensor]:
     image, state = _obs_to_tensors(obs, device)
     next_image, next_state = _obs_to_tensors(next_obs, device)
-    stage_id = supervision_stage_id(task_id, primitive_id)
+    stage_id = supervision_stage_id(task_id, primitive_id, primitive_vocabulary=primitive_vocabulary)
     return {
         "image": image.unsqueeze(0),
         "state": state.unsqueeze(0),
@@ -283,6 +286,7 @@ def evaluate_checkpoint(
                             TASK_TO_ID[task_name],
                             device,
                             model.action_dim,
+                            primitive_vocabulary=getattr(model, "primitive_vocabulary", PRIMITIVE_VOCAB_LEGACY),
                             prev_primitive=prev_primitive,
                         )
                     _online_refine_adapter(model, online_optimizer, cfg, online_batch)
@@ -371,6 +375,9 @@ def _select_tent_primitive(
     state = torch.from_numpy(obs["state"]).unsqueeze(0).float().to(device)
     task_ids = torch.tensor([task_id], device=device, dtype=torch.long)
     if optimizer is not None:
+        restore_eval = not model.training
+        if restore_eval:
+            model.train()
         optimizer.zero_grad(set_to_none=True)
         z, proposed_runtime = model.encode_step(image, state, runtime_state, task_ids=task_ids)
         logits = model.condition_policy_logits(model.policy_logits(z), z=z, task_ids=task_ids, state=state)
@@ -379,6 +386,8 @@ def _select_tent_primitive(
         entropy.backward()
         optimizer.step()
         runtime_state = proposed_runtime
+        if restore_eval:
+            model.eval()
     with torch.no_grad():
         primitive, runtime_state, _ = model.act(image, state, runtime_state, use_adapter=False, task_ids=task_ids)
     return int(primitive.item()), runtime_state

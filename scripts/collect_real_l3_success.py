@@ -149,8 +149,6 @@ def main() -> None:
                     frame_size = (int(frame.shape[1]), int(frame.shape[0]))
                 state = build_runtime_state(
                     current_q=current_q,
-                    attached=False,
-                    verified=False,
                     task_id=args.task_id,
                     step_idx=step,
                     horizon=len(primitive_ids),
@@ -160,8 +158,6 @@ def main() -> None:
                 next_frame = runner.camera.read()
                 next_state = build_runtime_state(
                     current_q=current_q,
-                    attached=False,
-                    verified=False,
                     task_id=args.task_id,
                     step_idx=step + 1,
                     horizon=len(primitive_ids),

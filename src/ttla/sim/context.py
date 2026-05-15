@@ -44,6 +44,24 @@ def sample_context(cfg: ContextConfig, rng: np.random.Generator) -> dict[str, fl
     }
 
 
+def neutral_context() -> dict[str, float]:
+    return {
+        "cam_x": 0.0,
+        "cam_y": 0.0,
+        "cam_z": 0.0,
+        "cam_roll": 0.0,
+        "cam_pitch": 0.0,
+        "cam_yaw": 0.0,
+        "fov_bias": 0.0,
+        "light_gain": 1.0,
+        "blur_sigma": 0.0,
+        "noise_std": 0.0,
+        "action_gain": 1.0,
+        "action_delay": 0,
+        "joint_bias": 0.0,
+    }
+
+
 def context_vector(context: dict[str, float]) -> np.ndarray:
     keys = [
         "cam_x",

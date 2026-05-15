@@ -72,7 +72,12 @@ class DeploymentRunner:
         runtime_state = self.model.init_runtime_state(batch_size=1, device=self.device)
         for step in range(self.cfg["runtime"].get("max_steps", 8)):
             frame = self.camera.read()
-            state = build_runtime_state(current_q=current_q, attached=False, verified=False, task_id=task_id, step_idx=step, horizon=self.cfg["runtime"].get("max_steps", 8))
+            state = build_runtime_state(
+                current_q=current_q,
+                task_id=task_id,
+                step_idx=step,
+                horizon=self.cfg["runtime"].get("max_steps", 8),
+            )
             image_t = torch.from_numpy(frame).permute(2, 0, 1).unsqueeze(0).float().to(self.device) / 255.0
             state_t = torch.from_numpy(state).unsqueeze(0).float().to(self.device)
             task_ids = torch.tensor([task_id], dtype=torch.long, device=self.device)

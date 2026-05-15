@@ -57,22 +57,21 @@ def _prepare_level1_episode(env: RoArmSimEnv, episode: int, retries: int = 4) ->
 
 
 def _prepare_level2_episode(env: RoArmSimEnv, episode: int, retries: int = 5) -> None:
-    modes = ("default", "prealign", "coarse", "fine", "verify_ready")
+    modes = ("default", "approach", "ready", "pregrasp", "ready")
     target_mode = modes[episode % len(modes)]
     for _ in range(retries):
         env.reset(task_name="level2_approach")
         if target_mode == "default":
             return
-        env._execute_prealign()
-        if target_mode == "prealign":
+        env._execute_approach()
+        if target_mode == "approach":
             return
-        env._execute_approach(fine=False)
-        if target_mode == "coarse":
+        if target_mode == "ready" and env.approach_success_ready():
             return
-        env._execute_approach(fine=True)
-        if target_mode == "fine":
+        env._execute_pregrasp_servo()
+        if target_mode == "pregrasp":
             return
-        if env.visibility_score() >= 0.12 and env.center_error_px() <= 20.0:
+        if env.pregrasp_ready() or env.approach_success_ready():
             return
     env.reset(task_name="level2_approach")
 

@@ -13,25 +13,22 @@ import numpy as np
 from ttla.config import load_config
 from ttla.deployment import DeploymentRunner
 from ttla.deployment.primitives import (
-    REAL_CARRY_QPOS,
-    REAL_GRASP_EXECUTE_DELTA,
+    REAL_APPROACH_QPOS,
     REAL_GRIPPER_CLOSED_QPOS,
     REAL_GRIPPER_OPEN_QPOS,
     REAL_HOME_QPOS,
+    REAL_LIFT_QPOS,
     REAL_PLACE_RELEASE_QPOS,
-    REAL_DROPZONE_HOVER_QPOS,
+    REAL_PREGRASP_QPOS,
+    REAL_TRANSPORT_QPOS,
     REAL_OBS_CENTER_QPOS,
     REAL_OBS_LEFT_QPOS,
     REAL_OBS_RIGHT_QPOS,
-    REAL_PREALIGN_QPOS,
-    REAL_PREGRASP_ANCHOR_QPOS,
-    REAL_PREGRASP_SERVO_DELTA,
 )
 from ttla.sim import RoArmSimEnv
 from ttla.sim.skills import (
     ABORT_ID,
-    APPROACH_COARSE_ID,
-    APPROACH_FINE_ID,
+    APPROACH_ID,
     GRASP_EXECUTE_ID,
     HOME_QPOS as SIM_HOME_QPOS,
     LIFT_OBJECT_ID,
@@ -42,10 +39,8 @@ from ttla.sim.skills import (
     OBS_RIGHT_ID,
     PLACE_OBJECT_ID,
     PREALIGN_BASE_QPOS as SIM_PREALIGN_BASE_QPOS,
-    PREALIGN_GRASP_ID,
     PREGRASP_SERVO_ID,
     PRIMITIVE_NAMES,
-    REOBSERVE_ID,
     RETREAT_ID,
     TRANSPORT_TO_DROPZONE_ID,
     primitive_name,
@@ -243,27 +238,20 @@ def _expected_next_real_qpos(current_q: np.ndarray, primitive_id: int) -> np.nda
     current_q = np.asarray(current_q, dtype=np.float32).copy()
     if primitive_id in (OBS_LEFT_ID, OBS_RIGHT_ID, OBS_CENTER_ID):
         return _expected_observe_pose(primitive_id)
-    if primitive_id == PREALIGN_GRASP_ID:
-        return REAL_PREALIGN_QPOS.copy()
-    if primitive_id == REOBSERVE_ID:
-        return REAL_OBS_CENTER_QPOS.copy()
-    if primitive_id == APPROACH_COARSE_ID:
-        return current_q + np.asarray([0.0, -0.12, -0.16, 0.08, 0.0, 0.0], dtype=np.float32)
-    if primitive_id == APPROACH_FINE_ID:
-        return current_q + np.asarray([0.0, -0.05, -0.07, 0.04, 0.0, 0.0], dtype=np.float32)
+    if primitive_id == APPROACH_ID:
+        return REAL_APPROACH_QPOS.copy()
     if primitive_id == RETREAT_ID:
         return current_q + np.asarray([0.0, 0.10, 0.14, -0.06, 0.0, 0.10], dtype=np.float32)
     if primitive_id == PREGRASP_SERVO_ID:
-        next_q = REAL_PREGRASP_ANCHOR_QPOS.copy() + REAL_PREGRASP_SERVO_DELTA
-        return next_q
+        return REAL_PREGRASP_QPOS.copy()
     if primitive_id == GRASP_EXECUTE_ID:
-        next_q = current_q + REAL_GRASP_EXECUTE_DELTA
+        next_q = current_q.copy()
         next_q[5] = REAL_GRIPPER_CLOSED_QPOS
         return next_q
     if primitive_id == LIFT_OBJECT_ID:
-        return REAL_CARRY_QPOS.copy()
+        return REAL_LIFT_QPOS.copy()
     if primitive_id == TRANSPORT_TO_DROPZONE_ID:
-        return REAL_DROPZONE_HOVER_QPOS.copy()
+        return REAL_TRANSPORT_QPOS.copy()
     if primitive_id == PLACE_OBJECT_ID:
         next_q = REAL_PLACE_RELEASE_QPOS.copy()
         next_q[5] = REAL_GRIPPER_OPEN_QPOS

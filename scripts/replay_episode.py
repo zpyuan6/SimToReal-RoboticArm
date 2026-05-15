@@ -36,7 +36,7 @@ def _overlay(frame: np.ndarray, arrays: dict[str, np.ndarray], meta: dict, idx: 
     action_name = actions[action_id] if 0 <= action_id < len(actions) else str(action_id)
     reward = float(arrays["rewards"][idx]) if idx < len(arrays["rewards"]) else 0.0
     context = arrays["contexts"][idx] if idx < len(arrays["contexts"]) else np.zeros(8, dtype=np.float32)
-    state = arrays["states"][idx] if idx < len(arrays["states"]) else np.zeros(16, dtype=np.float32)
+    state = arrays["states"][idx] if idx < len(arrays["states"]) else np.zeros(14, dtype=np.float32)
     info_raw = None
     if "infos" in arrays and idx < len(arrays["infos"]):
         info_candidate = arrays["infos"][idx]
@@ -47,8 +47,6 @@ def _overlay(frame: np.ndarray, arrays: dict[str, np.ndarray], meta: dict, idx: 
     info_dict = info_raw if isinstance(info_raw, dict) else {}
     visibility = float(info_dict.get("visibility", 0.0))
     success = int(info_dict.get("success", meta.get("success", 0)))
-    verified = float(state[-4]) if len(state) >= 4 else 0.0
-    grasped = float(state[-3]) if len(state) >= 3 else 0.0
     task_id = int(round(float(state[-2]))) if len(state) >= 2 else -1
     progress = float(state[-1]) if len(state) >= 1 else 0.0
     lines = [
@@ -59,7 +57,6 @@ def _overlay(frame: np.ndarray, arrays: dict[str, np.ndarray], meta: dict, idx: 
         f"Primitive: {action_name}",
         f"Reward: {reward:.3f}",
         f"Visibility: {visibility:.3f}",
-        f"Flags: verified={int(verified)} grasped={int(grasped)}",
         f"Task Id: {task_id}  Progress: {progress:.2f}",
         f"Success: {success}",
         "Controls: space pause, a prev, d next, q quit",

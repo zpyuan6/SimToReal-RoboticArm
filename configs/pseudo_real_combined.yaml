@@ -1,4 +1,4 @@
-seed: 7
+﻿seed: 7
 
 paths:
   data_root: data/pseudo_real_combined
@@ -42,8 +42,8 @@ pseudo_real:
 model:
   backbone_type: feedforward
   image_channels: 3
-  state_dim: 18
-  action_dim: 16
+  state_dim: 14
+  action_dim: 11
   action_residual_dim: 6
   latent_dim: 128
   hidden_dim: 128
@@ -228,3 +228,6 @@ backbone_overrides:
       level3_success_boost: 8.0
       level3_late_primitive_boost: 2.2
       level3_transport_stage_boost: 2.0
+
+
+

@@ -10,14 +10,9 @@ from torch import nn
 from ..sim.skills import (
     ABORT_ID,
     ABORT_FAMILY_ID,
-    APPROACH_COARSE_ID,
     APPROACH_FAMILY_ID,
-    APPROACH_FINE_ID,
-    CONFIRM_FAMILY_ID,
     GRASP_EXECUTE_ID,
     GRASP_FAMILY_ID,
-    HOLD_POSITION_ID,
-    HOLD_FAMILY_ID,
     LIFT_OBJECT_ID,
     LIFT_FAMILY_ID,
     OBS_CENTER_ID,
@@ -26,22 +21,19 @@ from ..sim.skills import (
     OBSERVE_FAMILY_ID,
     PLACE_OBJECT_ID,
     PLACE_FAMILY_ID,
-    PREALIGN_GRASP_ID,
     PREGRASP_SERVO_ID,
     PRIMITIVE_VOCAB_LEGACY,
-    REOBSERVE_ID,
     RECOVER_FAMILY_ID,
     RETREAT_ID,
     TRANSPORT_TO_DROPZONE_ID,
     TRANSPORT_FAMILY_ID,
-    VERIFY_TARGET_ID,
     family_projected_primitives,
     project_primitive_ids,
 )
 from ..sim.task_defs import TASK_SPECS, primitive_instruction, task_action_hint, task_allowed_primitives, task_instruction, task_primary_primitives
 from ..sim.task_defs import NUM_SUPERVISION_STAGES
 
-OBSERVATION_FAMILY_IDS = (OBSERVE_FAMILY_ID, CONFIRM_FAMILY_ID, HOLD_FAMILY_ID)
+OBSERVATION_FAMILY_IDS = (OBSERVE_FAMILY_ID,)
 
 
 def _hash_text_embedding(text: str, dim: int) -> torch.Tensor:
@@ -146,8 +138,6 @@ def _fixed_task_action_prior_table(
         for primitive_id in task_primary_primitives(spec.task_id, primitive_vocabulary=primitive_vocabulary):
             if 0 <= primitive_id < action_dim:
                 table[spec.task_id, primitive_id] = 1.0
-        for primitive_id in _valid_family_primitives((HOLD_FAMILY_ID,), action_dim, primitive_vocabulary):
-            table[spec.task_id, primitive_id] = max(table[spec.task_id, primitive_id], 0.6)
         for primitive_id in _valid_family_primitives((ABORT_FAMILY_ID,), action_dim, primitive_vocabulary):
             table[spec.task_id, primitive_id] = max(table[spec.task_id, primitive_id], 0.35)
     return table
@@ -187,30 +177,26 @@ def _fixed_stage_action_prior_table(
                 table[stage_id, primitive_id] = value
 
     observe_ids = _valid_family_primitives((OBSERVE_FAMILY_ID,), action_dim, primitive_vocabulary)
-    confirm_ids = _valid_family_primitives((CONFIRM_FAMILY_ID,), action_dim, primitive_vocabulary)
     approach_ids = _valid_family_primitives((APPROACH_FAMILY_ID,), action_dim, primitive_vocabulary)
     recover_ids = _valid_family_primitives((RECOVER_FAMILY_ID,), action_dim, primitive_vocabulary)
     grasp_ids = _valid_family_primitives((GRASP_FAMILY_ID,), action_dim, primitive_vocabulary)
     lift_ids = _valid_family_primitives((LIFT_FAMILY_ID,), action_dim, primitive_vocabulary)
     transport_ids = _valid_family_primitives((TRANSPORT_FAMILY_ID,), action_dim, primitive_vocabulary)
     place_ids = _valid_family_primitives((PLACE_FAMILY_ID,), action_dim, primitive_vocabulary)
-    hold_ids = _valid_family_primitives((HOLD_FAMILY_ID,), action_dim, primitive_vocabulary)
     abort_ids = _valid_family_primitives((ABORT_FAMILY_ID,), action_dim, primitive_vocabulary)
 
     # Observe / search.
     _set(0, observe_ids, 1.0)
-    _set(0, confirm_ids, 0.70)
     _set(0, recover_ids, 0.35)
-    _set(0, hold_ids + abort_ids, 0.15)
-    # Confirm.
-    _set(1, confirm_ids + hold_ids, 1.0)
-    _set(1, observe_ids, 0.45)
+    _set(0, abort_ids, 0.15)
+    # Reserved / compatibility stage.
+    _set(1, observe_ids, 0.55)
     _set(1, abort_ids, 0.2)
     # Approach / recover.
     _set(2, approach_ids, 1.0)
     _set(2, recover_ids, 0.75)
     _set(2, observe_ids, 0.30)
-    _set(2, hold_ids + abort_ids, 0.2)
+    _set(2, abort_ids, 0.2)
     # Grasp.
     _set(3, grasp_ids, 1.0)
     _set(3, approach_ids, 0.55)
@@ -227,9 +213,9 @@ def _fixed_stage_action_prior_table(
     # Place.
     _set(6, place_ids, 1.0)
     _set(6, transport_ids, 0.40)
-    _set(6, hold_ids + abort_ids, 0.2)
+    _set(6, abort_ids, 0.2)
     # Terminal.
-    _set(7, hold_ids + place_ids + abort_ids, 1.0)
+    _set(7, place_ids + abort_ids, 1.0)
     _set(7, recover_ids, 0.2)
     return table
 
@@ -334,10 +320,14 @@ def _stage_action_mask(
         state = state.unsqueeze(0)
     device = state.device
     mask = torch.zeros((state.shape[0], action_dim), device=device, dtype=state.dtype)
-    verified = state[..., -5] > 0.5 if state.shape[-1] >= 5 else torch.zeros(state.shape[0], dtype=torch.bool, device=device)
-    attached = state[..., -6] > 0.5 if state.shape[-1] >= 6 else torch.zeros(state.shape[0], dtype=torch.bool, device=device)
-    lifted = state[..., -4] > 0.5 if state.shape[-1] >= 4 else torch.zeros(state.shape[0], dtype=torch.bool, device=device)
-    placed = state[..., -3] > 0.5 if state.shape[-1] >= 3 else torch.zeros(state.shape[0], dtype=torch.bool, device=device)
+    # Route B uses only observable runtime state (qpos, qvel, task id, progress)
+    # rather than simulator-only task flags. Fall back to a task-level mask with
+    # coarse progress-based phasing instead of reading hidden booleans from the
+    # tail of the state vector.
+    progress = state[..., -1].clamp(0.0, 1.0) if state.shape[-1] >= 1 else torch.zeros(state.shape[0], device=device, dtype=state.dtype)
+    attached = torch.zeros(state.shape[0], dtype=torch.bool, device=device)
+    lifted = torch.zeros(state.shape[0], dtype=torch.bool, device=device)
+    placed = torch.zeros(state.shape[0], dtype=torch.bool, device=device)
 
     def _set_rows(rows: torch.Tensor, indices: list[int]) -> None:
         if rows.any():
@@ -347,31 +337,29 @@ def _stage_action_mask(
 
     # Generic manipulation phases. Task-specific differences are handled later
     # by intersecting this phase mask with the task-level allowed-action mask.
-    hold_ids = _valid_family_primitives((HOLD_FAMILY_ID,), action_dim, primitive_vocabulary)
     place_ids = _valid_family_primitives((PLACE_FAMILY_ID,), action_dim, primitive_vocabulary)
     abort_ids = _valid_family_primitives((ABORT_FAMILY_ID,), action_dim, primitive_vocabulary)
     lift_ids = _valid_family_primitives((LIFT_FAMILY_ID,), action_dim, primitive_vocabulary)
     recover_ids = _valid_family_primitives((RECOVER_FAMILY_ID,), action_dim, primitive_vocabulary)
     transport_ids = _valid_family_primitives((TRANSPORT_FAMILY_ID,), action_dim, primitive_vocabulary)
     observe_ids = _valid_family_primitives((OBSERVE_FAMILY_ID,), action_dim, primitive_vocabulary)
-    confirm_ids = _valid_family_primitives((CONFIRM_FAMILY_ID,), action_dim, primitive_vocabulary)
     approach_ids = _valid_family_primitives((APPROACH_FAMILY_ID,), action_dim, primitive_vocabulary)
     grasp_ids = _valid_family_primitives((GRASP_FAMILY_ID,), action_dim, primitive_vocabulary)
 
-    rows = placed
-    _set_rows(rows, hold_ids + place_ids + abort_ids)
+    rows = progress < 0.20
+    _set_rows(rows, observe_ids + approach_ids + recover_ids + abort_ids)
 
-    rows = (~placed) & attached & (~lifted)
-    _set_rows(rows, lift_ids + recover_ids + abort_ids)
+    rows = (progress >= 0.20) & (progress < 0.55)
+    _set_rows(rows, observe_ids + approach_ids + grasp_ids + recover_ids + abort_ids)
 
-    rows = (~placed) & attached & lifted
-    _set_rows(rows, transport_ids + place_ids + recover_ids + hold_ids + abort_ids)
+    rows = (progress >= 0.55) & (progress < 0.75)
+    _set_rows(rows, grasp_ids + lift_ids + recover_ids + abort_ids)
 
-    rows = (~placed) & (~attached) & verified
-    _set_rows(rows, observe_ids + confirm_ids + approach_ids + grasp_ids + recover_ids + hold_ids + abort_ids)
+    rows = (progress >= 0.75) & (progress < 0.90)
+    _set_rows(rows, lift_ids + transport_ids + place_ids + recover_ids + abort_ids)
 
-    rows = (~placed) & (~attached) & (~verified)
-    _set_rows(rows, observe_ids + confirm_ids + approach_ids + recover_ids + abort_ids)
+    rows = progress >= 0.90
+    _set_rows(rows, transport_ids + place_ids + abort_ids)
 
     fallback = mask.sum(dim=-1) == 0
     if fallback.any():

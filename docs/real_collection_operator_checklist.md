@@ -42,7 +42,7 @@ $env:UV_CACHE_DIR='F:\RoboticArm\.uv-cache'
 Run:
 
 ```powershell
-uv run python scripts\validate_actions.py --config configs/base.yaml --deploy-config configs/deployment_l3.yaml --task level3_pick_place --primitives 2,9,10,11,12,13
+uv run python scripts\validate_actions.py --config configs/base.yaml --deploy-config configs/deployment_l3.yaml --task level3_pick_place --primitives 2,3,5,6,7,8,9
 ```
 
 Expected result:
@@ -50,6 +50,7 @@ Expected result:
 - a validation session directory is written under `data/raw/action_validation`
 - the real arm visibly executes:
   - centered observation
+  - approach
   - pregrasp servo
   - grasp
   - lift
@@ -92,7 +93,6 @@ Expected arm behavior:
 
 - `obs_left` and `obs_right` visibly move the view to opposite sides
 - `obs_center` re-centers the target
-- `verify_target` is a brief stable hold
 
 Keep the episode if:
 
@@ -104,7 +104,6 @@ Redo the episode if:
 
 - there is motion blur
 - the target leaves the frame
-- `verify_target` causes unexpected motion
 
 Expected files after finishing the session:
 
@@ -130,15 +129,13 @@ Before pressing Enter for each episode:
 
 Expected arm behavior:
 
-- `prealign_grasp` moves to a frontal pre-grasp pose
-- `approach_coarse` makes the target visibly closer
-- `approach_fine` refines this without overshooting
+- `approach` makes the target visibly closer without overshooting
 - `retreat` clearly backs away
 
 Keep the episode if:
 
 - the target appears larger after approach
-- fine approach does not pass the target
+- approach does not pass the target
 - retreat restores clearance
 
 Redo the episode if:
@@ -167,6 +164,7 @@ Before pressing Enter for each episode:
 
 Expected arm behavior:
 
+- `approach` keeps the target visible while moving into the near-target window
 - `pregrasp_servo` lowers toward a plausible pre-grasp state
 - `grasp_execute` closes around the object
 - `lift_object` visibly raises the object

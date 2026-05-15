@@ -1,0 +1,51 @@
+base_config: base.yaml
+
+control:
+  enabled: true
+  backbone_name: smolvla
+  family: lightweight_vla
+  image_shape: [224, 224, 3]
+  proprio_dim: 14
+  uses_language: true
+  latent_adapter_target: multimodal_condition_latent
+  official:
+    provider: lerobot
+    policy_type: smolvla
+    policy_path: external_models/smolvla_base
+    enforce_official_training: true
+    config_overrides: {}
+  action:
+    control_mode: joint_delta
+    action_dim: 6
+    horizon: 50
+
+data_continuous:
+  train_path: data/continuous_v1/train.npz
+  val_path: data/continuous_v1/val.npz
+  test_path: data/continuous_v1/test.npz
+  history_len: 2
+  action_horizon: 50
+  task_text_enabled: true
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_smolvla_v1_clean
+    root: data/lerobot/roarm_continuous_train_smolvla_v1_clean
+  batch_size: 4
+  steps: 50000
+  save_freq: 2000
+  eval_freq: 0
+  output_dir: outputs/train/lerobot/smolvla
+  job_name: roarm_smolvla_official
+  policy_device: cuda
+  wandb_enable: false
+
+early_stop:
+  enabled: true
+  max_steps: 50000
+  stage_steps: 2000
+  patience: 2
+  min_delta: 0.0
+  episodes_per_task: 8
+  validation_batch_size: 4
+  validation_max_batches: 32

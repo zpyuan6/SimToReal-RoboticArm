@@ -4,22 +4,16 @@ import numpy as np
 
 from .skills import (
     ABORT_ID,
-    APPROACH_COARSE_ID,
-    APPROACH_FINE_ID,
+    APPROACH_ID,
     GRASP_EXECUTE_ID,
-    HOLD_POSITION_ID,
     LIFT_OBJECT_ID,
     OBS_CENTER_ID,
     OBS_LEFT_ID,
     OBS_RIGHT_ID,
     PLACE_OBJECT_ID,
-    PREALIGN_GRASP_ID,
     PREGRASP_SERVO_ID,
     RETREAT_ID,
     TRANSPORT_TO_DROPZONE_ID,
-    VERIFY_TARGET_ID,
-    PRIMITIVE_VOCAB_COMPACT,
-    remap_primitive_id,
 )
 
 
@@ -28,8 +22,6 @@ class PrimitiveOracle:
 
     @staticmethod
     def _emit(env, primitive_id: int) -> int:
-        if getattr(env, "primitive_vocabulary", "legacy") == PRIMITIVE_VOCAB_COMPACT:
-            return remap_primitive_id(int(primitive_id), PRIMITIVE_VOCAB_COMPACT)
         return int(primitive_id)
 
     def act(self, env) -> int:
@@ -59,31 +51,19 @@ class PrimitiveOracle:
             return self._emit(env, self._observe_action(env))
         if env.center_error_px() > self._scaled_px(env, 36.0):
             return self._emit(env, self._observe_action(env))
-        if env.verified:
-            return self._emit(env, HOLD_POSITION_ID)
-        return self._emit(env, VERIFY_TARGET_ID)
+        return self._emit(env, OBS_CENTER_ID)
 
     def _act_level2(self, env) -> int:
-        if env.approach_success_ready():
-            return self._emit(env, HOLD_POSITION_ID)
         if env.visibility_score() < 0.08:
             return self._emit(env, self._observe_action(env))
-        if env.center_error_px() > self._scaled_px(env, 24.0):
-            return self._emit(env, PREALIGN_GRASP_ID)
-        if env.pregrasp_ready():
-            return self._emit(env, APPROACH_FINE_ID)
+        if env.center_error_px() > self._scaled_px(env, 18.0):
+            return self._emit(env, self._observe_action(env))
         dist = env.ee_target_distance()
-        if dist > 0.19:
-            return self._emit(env, APPROACH_COARSE_ID)
-        if dist > 0.12:
-            return self._emit(env, APPROACH_FINE_ID)
-        if env.center_error_px() > self._scaled_px(env, 20.0):
-            return self._emit(env, RETREAT_ID)
-        return self._emit(env, HOLD_POSITION_ID)
+        if dist > 0.028 or env.center_error_px() > self._scaled_px(env, 10.0):
+            return self._emit(env, APPROACH_ID)
+        return self._emit(env, RETREAT_ID)
 
     def _act_level3(self, env) -> int:
-        if env.placed:
-            return self._emit(env, HOLD_POSITION_ID)
         if env.object_attached:
             if not env.lifted:
                 return self._emit(env, LIFT_OBJECT_ID)
@@ -91,14 +71,19 @@ class PrimitiveOracle:
                 return self._emit(env, TRANSPORT_TO_DROPZONE_ID)
             return self._emit(env, PLACE_OBJECT_ID)
         if env.visibility_score() < 0.08:
-            return self._emit(env, OBS_CENTER_ID)
+            return self._emit(env, self._observe_action(env))
         if env._ear_grasp_contact_count() > 0:
             return self._emit(env, GRASP_EXECUTE_ID)
-        if env.visibility_score() > 0.20 and env.center_error_px() < self._scaled_px(env, 14.0) and env.ee_target_distance() < 0.075:
+        if env.visibility_score() > 0.20 and env.center_error_px() < self._scaled_px(env, 6.0) and env.ee_target_distance() < 0.030:
             return self._emit(env, GRASP_EXECUTE_ID)
+        if env.center_error_px() > self._scaled_px(env, 18.0):
+            return self._emit(env, self._observe_action(env))
+        dist = env.ee_target_distance()
+        if not env.approach_success_ready():
+            return self._emit(env, APPROACH_ID)
+        if dist > 0.035 or env.center_error_px() > self._scaled_px(env, 10.0):
+            return self._emit(env, APPROACH_ID)
         if not env.pregrasp_ready():
-            return self._emit(env, PREGRASP_SERVO_ID)
-        if env.ee_target_distance() > 0.07:
             return self._emit(env, PREGRASP_SERVO_ID)
         return self._emit(env, GRASP_EXECUTE_ID)
 

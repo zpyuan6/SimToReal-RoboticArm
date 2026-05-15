@@ -33,19 +33,17 @@ sessions:
       - The target should still be recoverable from obs_left or obs_right with one follow-up obs_center action.
     acceptance_criteria:
       - After obs_center, the target should be clearly visible and near the horizontal center of the frame.
-      - After verify_target, no accidental arm collision or large camera shake should be visible.
       - Redo any episode where the target leaves the frame during the observation sequence.
     video_expectations:
       - obs_left and obs_right should visibly move the target to opposite sides of the frame.
       - obs_center should bring the target back toward the center band.
-      - verify_target should look like a brief stable hold rather than a second large motion.
     sequences:
-      - name: left_center_confirm
-        primitives: [obs_left, obs_center, verify_target]
-      - name: right_center_confirm
-        primitives: [obs_right, obs_center, verify_target]
-      - name: center_confirm
-        primitives: [obs_center, verify_target]
+      - name: left_center
+        primitives: [obs_left, obs_center]
+      - name: right_center
+        primitives: [obs_right, obs_center]
+      - name: center
+        primitives: [obs_center]
 
   calib_l2_center:
     task: level2_approach
@@ -57,20 +55,19 @@ sessions:
       - Keep the object outside the gripper at reset; do not start in contact.
       - Use modest orientation variation only; do not rotate the ear handle away from the gripper side.
     acceptance_criteria:
-      - prealign_grasp should move the arm into a coarse frontal approach posture without overshooting.
-      - approach_coarse then approach_fine should make the target appear larger and more centered.
+      - approach should make the target appear larger and more centered without passing it.
       - retreat should move the gripper visibly away from the target and restore clearance.
     video_expectations:
-      - The target should occupy more image area after approach_fine than before prealign_grasp.
-      - No sudden jump should place the gripper past the target after approach_fine.
+      - The target should occupy more image area after approach than before obs_center.
+      - No sudden jump should place the gripper past the target after approach.
       - retreat should reverse the approach visually rather than continuing forward.
     sequences:
       - name: center_approach
-        primitives: [obs_center, prealign_grasp, approach_coarse, approach_fine, retreat]
+        primitives: [obs_center, approach, retreat]
       - name: left_to_approach
-        primitives: [obs_left, obs_center, prealign_grasp, approach_coarse, approach_fine, retreat]
+        primitives: [obs_left, obs_center, approach, retreat]
       - name: right_to_approach
-        primitives: [obs_right, obs_center, prealign_grasp, approach_coarse, approach_fine, retreat]
+        primitives: [obs_right, obs_center, approach, retreat]
 
   calib_l3_center:
     task: level3_pick_place
@@ -82,6 +79,7 @@ sessions:
       - Keep the blue drop zone fixed and unobstructed on the right-side destination area.
       - Keep the object far enough from the drop zone that transport_to_dropzone produces visible motion.
     acceptance_criteria:
+      - approach should keep the target visible before pregrasp_servo takes over.
       - pregrasp_servo should lower toward a near-target pre-grasp pose without contacting the object too early.
       - grasp_execute should close around the ear handle region rather than closing in free space.
       - lift_object should visibly raise the object; place_object should visibly open the gripper over the drop zone.
@@ -91,9 +89,9 @@ sessions:
       - transport_to_dropzone and place_object should move the object into the blue zone region.
     sequences:
       - name: center_pick_place
-        primitives: [obs_center, pregrasp_servo, grasp_execute, lift_object, transport_to_dropzone, place_object, retreat]
-      - name: reobserve_pick_place
-        primitives: [reobserve, pregrasp_servo, grasp_execute, lift_object, transport_to_dropzone, place_object, retreat]
+        primitives: [obs_center, approach, pregrasp_servo, grasp_execute, lift_object, transport_to_dropzone, place_object, retreat]
+      - name: left_pick_place
+        primitives: [obs_left, obs_center, approach, pregrasp_servo, grasp_execute, lift_object, transport_to_dropzone, place_object, retreat]
 
   heldout_l1_offset:
     task: level1_verify
@@ -105,17 +103,17 @@ sessions:
       - Do not reuse the exact calibration placements in the same session block.
       - Keep the target fully inside the reachable observation field.
     acceptance_criteria:
-      - The target should require a meaningful observation correction before verify_target.
+      - The target should require a meaningful observation correction before returning to center.
       - obs_center should still be able to recover a near-centered view in one step.
     video_expectations:
       - The before/after difference between obs_left or obs_right and obs_center should be larger than in calibration clips.
     sequences:
-      - name: left_center_confirm
-        primitives: [obs_left, obs_center, verify_target]
-      - name: right_center_confirm
-        primitives: [obs_right, obs_center, verify_target]
-      - name: center_confirm
-        primitives: [obs_center, verify_target]
+      - name: left_center
+        primitives: [obs_left, obs_center]
+      - name: right_center
+        primitives: [obs_right, obs_center]
+      - name: center
+        primitives: [obs_center]
 
   heldout_l2_offset:
     task: level2_approach
@@ -127,17 +125,17 @@ sessions:
       - Ensure the target is still reachable by the approach chain without manual intervention.
       - Alternate left, right, and front-biased placements across repeats.
     acceptance_criteria:
-      - approach_coarse and approach_fine should still reduce apparent target distance from the gripper.
+      - approach should still reduce apparent target distance from the gripper.
       - retreat should return the gripper to a visibly safer clearance state.
     video_expectations:
       - Held-out approach clips should look harder than center-band clips but still physically executable.
     sequences:
       - name: center_approach
-        primitives: [obs_center, prealign_grasp, approach_coarse, approach_fine, retreat]
+        primitives: [obs_center, approach, retreat]
       - name: left_to_approach
-        primitives: [obs_left, obs_center, prealign_grasp, approach_coarse, approach_fine, retreat]
+        primitives: [obs_left, obs_center, approach, retreat]
       - name: right_to_approach
-        primitives: [obs_right, obs_center, prealign_grasp, approach_coarse, approach_fine, retreat]
+        primitives: [obs_right, obs_center, approach, retreat]
 
   heldout_l3_offset:
     task: level3_pick_place
@@ -156,6 +154,6 @@ sessions:
       - The full clip should still show the object being lifted, transported, and released into the destination region.
     sequences:
       - name: center_pick_place
-        primitives: [obs_center, pregrasp_servo, grasp_execute, lift_object, transport_to_dropzone, place_object, retreat]
-      - name: reobserve_pick_place
-        primitives: [reobserve, pregrasp_servo, grasp_execute, lift_object, transport_to_dropzone, place_object, retreat]
+        primitives: [obs_center, approach, pregrasp_servo, grasp_execute, lift_object, transport_to_dropzone, place_object, retreat]
+      - name: left_pick_place
+        primitives: [obs_left, obs_center, approach, pregrasp_servo, grasp_execute, lift_object, transport_to_dropzone, place_object, retreat]

@@ -59,11 +59,21 @@ def main() -> None:
                 frame = runner.camera.read()
                 if frame_size is None:
                     frame_size = (int(frame.shape[1]), int(frame.shape[0]))
-                state = build_runtime_state(current_q=current_q, attached=False, verified=False, task_id=args.task_id, step_idx=step, horizon=len(primitive_ids))
+                state = build_runtime_state(
+                    current_q=current_q,
+                    task_id=args.task_id,
+                    step_idx=step,
+                    horizon=len(primitive_ids),
+                )
                 result = runner.executor.run(primitive_id)
                 current_q = runner.executor.current_q.copy()
                 next_frame = runner.camera.read()
-                next_state = build_runtime_state(current_q=current_q, attached=False, verified=False, task_id=args.task_id, step_idx=step + 1, horizon=len(primitive_ids))
+                next_state = build_runtime_state(
+                    current_q=current_q,
+                    task_id=args.task_id,
+                    step_idx=step + 1,
+                    horizon=len(primitive_ids),
+                )
                 sample_idx = len(recorded_primitives)
                 primitive_label = primitive_name(primitive_id)
                 before_rel = _write_frame(

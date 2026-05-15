@@ -85,12 +85,12 @@ This is the held-out placement family. Do not reuse exact `center_band` placemen
 
 ### L1: `level1_verify`
 Purpose:
-- collect observation and confirmation transitions
+- collect observation correction transitions
 
 Sequences:
-- `obs_left -> obs_center -> verify_target`
-- `obs_right -> obs_center -> verify_target`
-- `obs_center -> verify_target`
+- `obs_left -> obs_center`
+- `obs_right -> obs_center`
+- `obs_center`
 
 Expected use:
 - adapter calibration for observation semantics
@@ -101,9 +101,9 @@ Purpose:
 - collect observation-to-pregrasp transitions
 
 Sequences:
-- `obs_center -> prealign_grasp -> approach_coarse -> approach_fine -> retreat`
-- `obs_left -> obs_center -> prealign_grasp -> approach_coarse -> approach_fine -> retreat`
-- `obs_right -> obs_center -> prealign_grasp -> approach_coarse -> approach_fine -> retreat`
+- `obs_center -> approach -> retreat`
+- `obs_left -> obs_center -> approach -> retreat`
+- `obs_right -> obs_center -> approach -> retreat`
 
 Expected use:
 - adapter calibration for approach-stage dynamics
@@ -114,8 +114,8 @@ Purpose:
 - collect full manipulation-stage transitions
 
 Sequences:
-- `obs_center -> pregrasp_servo -> grasp_execute -> lift_object -> transport_to_dropzone -> place_object -> retreat`
-- `reobserve -> pregrasp_servo -> grasp_execute -> lift_object -> transport_to_dropzone -> place_object -> retreat`
+- `obs_center -> approach -> pregrasp_servo -> grasp_execute -> lift_object -> transport_to_dropzone -> place_object -> retreat`
+- `obs_left -> obs_center -> approach -> pregrasp_servo -> grasp_execute -> lift_object -> transport_to_dropzone -> place_object -> retreat`
 
 Expected use:
 - adapter calibration for manipulation dynamics
@@ -140,31 +140,28 @@ Keep the episode if:
 
 - `obs_left` and `obs_right` visibly move the view to opposite sides
 - `obs_center` returns the target toward the center band
-- `verify_target` looks like a short stable hold, not a large extra motion
 
 Reject if:
 
 - observation poses are indistinguishable
 - `obs_center` does not improve target centering
-- `verify_target` causes unexpected movement
 
 ### L2 acceptance
 Keep the episode if:
 
-- `prealign_grasp` moves into a coarse frontal approach pose
-- `approach_coarse` makes the target noticeably closer/larger
-- `approach_fine` refines this rather than overshooting
+- `approach` makes the target noticeably closer/larger without overshooting
 - `retreat` increases clearance and backs away
 
 Reject if:
 
-- the arm passes the target during `approach_fine`
+- the arm passes the target during `approach`
 - `retreat` keeps moving forward instead of reversing
 - the target becomes unobservable because of bad approach geometry
 
 ### L3 acceptance
 Keep the episode if:
 
+- `approach` keeps the target visible before `pregrasp_servo`
 - `pregrasp_servo` lowers toward a plausible pre-grasp state
 - `grasp_execute` closes on the object rather than empty space
 - `lift_object` visibly raises the object
@@ -234,7 +231,7 @@ This order is deliberate:
 
 ```powershell
 $env:UV_CACHE_DIR='F:\RoboticArm\.uv-cache'
-uv run python scripts\validate_actions.py --config configs/base.yaml --deploy-config configs/deployment_l3.yaml --task level3_pick_place --primitives 2,9,10,11,12,13
+uv run python scripts\validate_actions.py --config configs/base.yaml --deploy-config configs/deployment_l3.yaml --task level3_pick_place --primitives 2,3,5,6,7,8,9
 ```
 
 Do not start collection until this looks correct.

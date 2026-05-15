@@ -1,4 +1,4 @@
-seed: 11
+﻿seed: 11
 
 paths:
   data_root: data/processed_direct
@@ -36,8 +36,8 @@ data:
 model:
   backbone_type: feedforward
   image_channels: 3
-  state_dim: 18
-  action_dim: 16
+  state_dim: 14
+  action_dim: 11
   action_residual_dim: 6
   latent_dim: 128
   hidden_dim: 128
@@ -94,3 +94,6 @@ adaptation:
 evaluation:
   episodes_per_task: 96
   report_name: summary.csv
+
+
+

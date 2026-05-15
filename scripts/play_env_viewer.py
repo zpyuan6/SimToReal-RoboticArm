@@ -20,22 +20,17 @@ from ttla.training import build_model
 from ttla.sim import RoArmSimEnv, ScriptedExpert
 from ttla.sim.skills import (
     ABORT_ID,
-    APPROACH_COARSE_ID,
-    APPROACH_FINE_ID,
+    APPROACH_ID,
     GRASP_EXECUTE_ID,
-    HOLD_POSITION_ID,
     LIFT_OBJECT_ID,
     OBS_CENTER_ID,
     OBS_LEFT_ID,
     OBS_RIGHT_ID,
     PLACE_OBJECT_ID,
-    PREALIGN_GRASP_ID,
     PREGRASP_SERVO_ID,
     PRIMITIVE_NAMES,
-    REOBSERVE_ID,
     RETREAT_ID,
     TRANSPORT_TO_DROPZONE_ID,
-    VERIFY_TARGET_ID,
     primitive_name,
 )
 from ttla.sim.task_defs import TASK_TO_ID
@@ -47,18 +42,13 @@ MANUAL_KEYMAP = {
     glfw.KEY_A: OBS_LEFT_ID,
     glfw.KEY_D: OBS_RIGHT_ID,
     glfw.KEY_C: OBS_CENTER_ID,
-    glfw.KEY_V: VERIFY_TARGET_ID,
-    glfw.KEY_P: PREALIGN_GRASP_ID,
-    glfw.KEY_E: APPROACH_COARSE_ID,
-    glfw.KEY_R: APPROACH_FINE_ID,
+    glfw.KEY_E: APPROACH_ID,
     glfw.KEY_T: RETREAT_ID,
-    glfw.KEY_O: REOBSERVE_ID,
     glfw.KEY_G: PREGRASP_SERVO_ID,
     glfw.KEY_F: GRASP_EXECUTE_ID,
     glfw.KEY_L: LIFT_OBJECT_ID,
     glfw.KEY_M: TRANSPORT_TO_DROPZONE_ID,
     glfw.KEY_Y: PLACE_OBJECT_ID,
-    glfw.KEY_H: HOLD_POSITION_ID,
     glfw.KEY_X: ABORT_ID,
 }
 
@@ -168,9 +158,7 @@ def _status_label(success: int, episode_done: bool, last_action: int) -> str:
 def _controls_text() -> str:
     return (
         "a/d/c observe L/R/C\n"
-        "v verify | p prealign\n"
-        "e/r approach coarse/fine\n"
-        "t retreat | o reobserve\n"
+        "e approach | t retreat\n"
         "g servo | f grasp\n"
         "l lift | m move | y place\n"
         "x abort | n reset | q quit"
@@ -194,6 +182,7 @@ def _update_overlay(
     task_metrics = (
         f"vis={env.visibility_score():.3f} "
         f"center={env.center_error_px():.1f}px "
+        f"gap={env.grasp_gap():+.3f}m "
         f"ee->obj={env.ee_target_distance():.3f}m "
         f"ee->drop={env.dropzone_distance():.3f}m"
     )

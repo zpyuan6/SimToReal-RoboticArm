@@ -15,14 +15,9 @@ from ..models import BaseTTLAModel, build_backbone_model, load_model_state
 from ..sim.skills import (
     ABORT_ID,
     ABORT_FAMILY_ID,
-    APPROACH_COARSE_ID,
     APPROACH_FAMILY_ID,
-    APPROACH_FINE_ID,
-    CONFIRM_FAMILY_ID,
     GRASP_EXECUTE_ID,
     GRASP_FAMILY_ID,
-    HOLD_POSITION_ID,
-    HOLD_FAMILY_ID,
     LIFT_OBJECT_ID,
     LIFT_FAMILY_ID,
     OBS_CENTER_ID,
@@ -31,18 +26,14 @@ from ..sim.skills import (
     OBSERVE_FAMILY_ID,
     PLACE_FAMILY_ID,
     PLACE_OBJECT_ID,
-    PREALIGN_GRASP_ID,
     PREGRASP_SERVO_ID,
     PRIMITIVE_VOCAB_LEGACY,
-    REOBSERVE_ID,
     RECOVER_FAMILY_ID,
     RETREAT_ID,
     TRANSPORT_TO_DROPZONE_ID,
     TRANSPORT_FAMILY_ID,
-    VERIFY_TARGET_ID,
     family_projected_primitives,
     project_primitive_ids,
-    remap_primitive_id,
 )
 from ..utils.io import ensure_dir
 
@@ -656,7 +647,7 @@ def _policy_preservation_loss(
     if mode == "family":
         family_groups = (
             _projected_family_ids(
-                (OBSERVE_FAMILY_ID, CONFIRM_FAMILY_ID, HOLD_FAMILY_ID),
+                (OBSERVE_FAMILY_ID,),
                 primitive_vocabulary=primitive_vocabulary,
             ),
             _projected_family_ids(
@@ -748,7 +739,7 @@ def _primitive_family_adaptation_weights(
     weights = torch.full_like(primitive_ids, float(precontact_weight), dtype=torch.float32)
     observation_ids = set(
         _projected_family_ids(
-            (OBSERVE_FAMILY_ID, CONFIRM_FAMILY_ID, HOLD_FAMILY_ID),
+            (OBSERVE_FAMILY_ID,),
             primitive_vocabulary=primitive_vocabulary,
         )
     )
@@ -796,7 +787,7 @@ def _observation_family_mask(
 ) -> torch.Tensor:
     observation_ids = set(
         _projected_family_ids(
-            (OBSERVE_FAMILY_ID, CONFIRM_FAMILY_ID, HOLD_FAMILY_ID),
+            (OBSERVE_FAMILY_ID,),
             primitive_vocabulary=primitive_vocabulary,
         )
     )

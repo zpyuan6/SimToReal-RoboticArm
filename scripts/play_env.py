@@ -16,22 +16,17 @@ from ttla.training import build_model
 from ttla.sim import RoArmSimEnv, ScriptedExpert
 from ttla.sim.skills import (
     ABORT_ID,
-    APPROACH_COARSE_ID,
-    APPROACH_FINE_ID,
+    APPROACH_ID,
     GRASP_EXECUTE_ID,
-    HOLD_POSITION_ID,
     LIFT_OBJECT_ID,
     OBS_CENTER_ID,
     OBS_LEFT_ID,
     OBS_RIGHT_ID,
     PLACE_OBJECT_ID,
-    PREALIGN_GRASP_ID,
     PREGRASP_SERVO_ID,
     PRIMITIVE_NAMES,
-    REOBSERVE_ID,
     RETREAT_ID,
     TRANSPORT_TO_DROPZONE_ID,
-    VERIFY_TARGET_ID,
     primitive_name,
 )
 from ttla.sim.task_defs import TASK_TO_ID
@@ -55,18 +50,13 @@ MANUAL_KEYS = {
     ord("a"): OBS_LEFT_ID,
     ord("d"): OBS_RIGHT_ID,
     ord("c"): OBS_CENTER_ID,
-    ord("v"): VERIFY_TARGET_ID,
-    ord("p"): PREALIGN_GRASP_ID,
-    ord("e"): APPROACH_COARSE_ID,
-    ord("r"): APPROACH_FINE_ID,
+    ord("e"): APPROACH_ID,
     ord("t"): RETREAT_ID,
-    ord("o"): REOBSERVE_ID,
     ord("g"): PREGRASP_SERVO_ID,
     ord("f"): GRASP_EXECUTE_ID,
     ord("l"): LIFT_OBJECT_ID,
     ord("m"): TRANSPORT_TO_DROPZONE_ID,
     ord("y"): PLACE_OBJECT_ID,
-    ord("h"): HOLD_POSITION_ID,
     ord("x"): ABORT_ID,
 }
 
@@ -146,9 +136,7 @@ def _metric_line(canvas: np.ndarray, label: str, value: str, y: int) -> None:
 def _primitive_control_lines() -> list[str]:
     return [
         "a/d/c: observe left/right/center",
-        "v: verify  p: prealign",
-        "e/r: coarse/fine approach",
-        "t: retreat  o: reobserve",
+        "e: approach  t: retreat",
         "g: pregrasp servo  f: grasp",
         "l: lift  m: move to dropzone",
         "y: place  x: abort",
@@ -218,6 +206,7 @@ def _compose_dashboard(
     dashboard[126:566, 680:1240] = overview
 
     distance = env.ee_target_distance()
+    grasp_gap = env.grasp_gap()
     drop_distance = env.dropzone_distance()
     _metric_line(dashboard[664:820, 40:440], "Task", env.task_name, 30)
     _metric_line(dashboard[664:820, 40:440], "Mode", mode, 58)
@@ -225,9 +214,10 @@ def _compose_dashboard(
     _metric_line(dashboard[664:820, 40:440], "Step", f"{step}", 114)
     _metric_line(dashboard[664:820, 40:440], "Visibility", f"{env.visibility_score():.3f}", 142)
     _metric_line(dashboard[664:820, 40:440], "Center Error", f"{env.center_error_px():.1f}px", 170)
-    _metric_line(dashboard[664:820, 40:440], "EE->Target", f"{distance:.3f} m", 198)
-    _metric_line(dashboard[664:820, 40:440], "EE->Dropzone", f"{drop_distance:.3f} m", 226)
-    _metric_line(dashboard[664:820, 40:440], "Flags", f"verified={int(env.verified)} grasped={int(env.object_attached)} placed={int(env.placed)}", 254)
+    _metric_line(dashboard[664:820, 40:440], "Grasp Gap", f"{grasp_gap:+.3f}m", 198)
+    _metric_line(dashboard[664:820, 40:440], "EE->Target", f"{distance:.3f} m", 226)
+    _metric_line(dashboard[664:820, 40:440], "EE->Dropzone", f"{drop_distance:.3f} m", 254)
+    _metric_line(dashboard[664:820, 40:440], "Flags", f"verified={int(env.verified)} grasped={int(env.object_attached)} placed={int(env.placed)}", 282)
 
     history_y = 676
     visible_history = action_history[-7:] if action_history else ["none"]

@@ -1,0 +1,51 @@
+base_config: base.yaml
+
+control:
+  enabled: true
+  backbone_name: diffusion_policy
+  family: generative_diffusion_control
+  image_shape: [224, 224, 3]
+  proprio_dim: 14
+  uses_language: false
+  latent_adapter_target: diffusion_condition_latent
+  official:
+    provider: lerobot
+    policy_type: diffusion
+    policy_path:
+    enforce_official_training: true
+    config_overrides: {}
+  action:
+    control_mode: joint_delta
+    action_dim: 6
+    horizon: 16
+
+data_continuous:
+  train_path: data/continuous_v1/train.npz
+  val_path: data/continuous_v1/val.npz
+  test_path: data/continuous_v1/test.npz
+  history_len: 2
+  action_horizon: 16
+  task_text_enabled: false
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_v1
+    root: data/lerobot/roarm_continuous_train_v1
+  batch_size: 8
+  steps: 50000
+  save_freq: 5000
+  eval_freq: 0
+  output_dir: outputs/train/lerobot/diffusion
+  job_name: roarm_diffusion_official
+  policy_device: cuda
+  wandb_enable: false
+
+early_stop:
+  enabled: true
+  max_steps: 50000
+  stage_steps: 5000
+  patience: 2
+  min_delta: 0.0
+  episodes_per_task: 8
+  validation_batch_size: 8
+  validation_max_batches: 64

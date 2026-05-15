@@ -22,15 +22,12 @@ from ttla.utils.io import ensure_dir, save_npz, write_json
 @dataclass
 class RuntimeFlags:
     attached: bool = False
-    verified: bool = False
     lifted: bool = False
     placed: bool = False
 
     def apply(self, primitive_idx: int) -> None:
         label = primitive_name(int(primitive_idx))
-        if label == "verify_target":
-            self.verified = True
-        elif label == "grasp_execute":
+        if label == "grasp_execute":
             self.attached = True
             self.placed = False
         elif label == "lift_object":
@@ -42,7 +39,6 @@ class RuntimeFlags:
             self.lifted = False
         elif label == "abort":
             self.attached = False
-            self.verified = False
             self.lifted = False
             self.placed = False
 
@@ -290,13 +286,9 @@ def main() -> None:
                 stage_before = supervision_stage_id(task_id, primitive_idx)
                 state = build_runtime_state(
                     current_q=current_q,
-                    attached=flags.attached,
-                    verified=flags.verified,
                     task_id=task_id,
                     step_idx=step_index,
                     horizon=len(primitive_sequence),
-                    lifted=flags.lifted,
-                    placed=flags.placed,
                 )
                 result = runner.executor.run(primitive_idx)
                 current_q = runner.executor.current_q.copy()
@@ -304,13 +296,9 @@ def main() -> None:
                 after = runner.camera.read()
                 next_state = build_runtime_state(
                     current_q=current_q,
-                    attached=flags.attached,
-                    verified=flags.verified,
                     task_id=task_id,
                     step_idx=step_index + 1,
                     horizon=len(primitive_sequence),
-                    lifted=flags.lifted,
-                    placed=flags.placed,
                 )
                 primitive_label = primitive_name(primitive_idx)
                 before_path = frames_dir / f"episode_{episode_index:04d}_step_{step_index:03d}_before_{primitive_label}.jpg"

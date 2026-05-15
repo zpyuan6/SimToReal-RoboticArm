@@ -19,6 +19,7 @@ dependencies = [
   "scipy>=1.14",
   "imageio>=2.35",
   "pyserial>=3.5",
+  "lerobot[smolvla]==0.4.4",
 ]
 
 [tool.uv]

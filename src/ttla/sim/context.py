@@ -4,6 +4,33 @@ from dataclasses import dataclass
 
 import numpy as np
 
+FULL_CONTEXT_KEYS = [
+    "cam_x",
+    "cam_y",
+    "cam_z",
+    "cam_roll",
+    "cam_pitch",
+    "cam_yaw",
+    "fov_bias",
+    "light_gain",
+    "blur_sigma",
+    "noise_std",
+    "action_gain",
+    "action_delay",
+    "joint_bias",
+]
+
+CONTEXT_VECTOR_KEYS = [
+    "cam_x",
+    "cam_y",
+    "cam_z",
+    "cam_pitch",
+    "cam_yaw",
+    "light_gain",
+    "action_gain",
+    "joint_bias",
+]
+
 
 @dataclass
 class ContextConfig:
@@ -63,14 +90,21 @@ def neutral_context() -> dict[str, float]:
 
 
 def context_vector(context: dict[str, float]) -> np.ndarray:
-    keys = [
-        "cam_x",
-        "cam_y",
-        "cam_z",
-        "cam_pitch",
-        "cam_yaw",
-        "light_gain",
-        "action_gain",
-        "joint_bias",
-    ]
-    return np.asarray([context[k] for k in keys], dtype=np.float32)
+    return np.asarray([context[k] for k in CONTEXT_VECTOR_KEYS], dtype=np.float32)
+
+
+def full_context_vector(context: dict[str, float]) -> np.ndarray:
+    return np.asarray([context[k] for k in FULL_CONTEXT_KEYS], dtype=np.float32)
+
+
+def context_from_full_vector(values: np.ndarray) -> dict[str, float]:
+    array = np.asarray(values, dtype=np.float32).reshape(-1)
+    if array.shape[0] != len(FULL_CONTEXT_KEYS):
+        raise ValueError(f"Expected {len(FULL_CONTEXT_KEYS)} context values, got shape {array.shape}")
+    context: dict[str, float] = {}
+    for key, value in zip(FULL_CONTEXT_KEYS, array):
+        if key == "action_delay":
+            context[key] = int(round(float(value)))
+        else:
+            context[key] = float(value)
+    return context

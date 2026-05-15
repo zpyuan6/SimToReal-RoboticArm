@@ -56,10 +56,14 @@ class RoArmSimEnv:
         self.model = mujoco.MjModel.from_xml_path(str(xml_path))
         self.data = mujoco.MjData(self.model)
         self.obs_renderer = mujoco.Renderer(self.model, height=self.cfg["image_size"], width=self.cfg["image_size"])
+        self.seg_renderer = mujoco.Renderer(self.model, height=self.cfg["image_size"], width=self.cfg["image_size"])
         # Keep the debug renderer large enough for inspection without exceeding
         # the default MuJoCo offscreen framebuffer configured in the XML.
         self.debug_size = min(512, max(256, int(self.cfg["image_size"]) * 2))
         self.debug_renderer = mujoco.Renderer(self.model, height=self.debug_size, width=self.debug_size)
+        self.robot_hidden_scene_option = mujoco.MjvOption()
+        self.robot_hidden_scene_option.geomgroup[:] = 1
+        self.robot_hidden_scene_option.geomgroup[2] = 0
         self._cache_contact_ids()
         self.context_cfg = ContextConfig(**sim_cfg["context"])
         self.action_delay_queue: deque[np.ndarray] = deque()
@@ -85,11 +89,22 @@ class RoArmSimEnv:
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "gripper_upper_finger_geom"),
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "gripper_lower_finger_geom"),
         }
+        self.gripper_visible_geom_ids = set(self.gripper_contact_geom_ids)
         self.target_ear_geom_ids = {
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_left_ear_front_contact"),
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_left_ear_back_contact"),
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_right_ear_front_contact"),
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_right_ear_back_contact"),
+        }
+        self.target_visible_geom_ids = {
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_body_lower"),
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_body_upper"),
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_body_neck"),
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_left_ear_front"),
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_left_ear_back"),
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_right_ear_front"),
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_right_ear_back"),
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_bow"),
         }
 
     def reset(self, task_name: str | None = None, context: dict[str, float] | None = None) -> dict[str, np.ndarray]:
@@ -140,10 +155,16 @@ class RoArmSimEnv:
 
     def _sample_task_layout(self) -> None:
         if self.task_name == "level3_pick_place":
-            target_x = self.rng.uniform(0.28, 0.30)
-            target_y = self.rng.uniform(-0.02, 0.02)
             drop_x = self.rng.uniform(0.23, 0.26)
             drop_y = self.rng.uniform(-0.13, -0.11)
+            half_extent = np.asarray([0.055, 0.055], dtype=np.float64)
+            for _ in range(128):
+                target_x = self.rng.uniform(0.22, 0.38)
+                target_y = self.rng.uniform(-0.12, 0.12)
+                if not np.all(np.abs(np.asarray([target_x, target_y]) - np.asarray([drop_x, drop_y])) <= half_extent):
+                    break
+            else:
+                raise RuntimeError("Could not sample a level3 target position outside the drop zone.")
         else:
             target_x = self.rng.uniform(0.22, 0.38)
             target_y = self.rng.uniform(-0.12, 0.12)
@@ -187,6 +208,27 @@ class RoArmSimEnv:
 
     def render_debug_view(self, camera_name: str = "overview_cam") -> np.ndarray:
         return self._apply_context_appearance(self._render_camera(camera_name, self.debug_renderer), include_noise=False)
+
+    def _segmentation_image(
+        self,
+        camera_name: str = "forearm_cam",
+        scene_option: mujoco.MjvOption | None = None,
+    ) -> np.ndarray:
+        self.seg_renderer.enable_segmentation_rendering()
+        try:
+            self.seg_renderer.update_scene(self.data, camera=camera_name, scene_option=scene_option)
+            return self.seg_renderer.render().copy()
+        finally:
+            self.seg_renderer.disable_segmentation_rendering()
+
+    def _visible_geom_mask(
+        self,
+        geom_ids: set[int],
+        camera_name: str = "forearm_cam",
+        scene_option: mujoco.MjvOption | None = None,
+    ) -> np.ndarray:
+        seg = self._segmentation_image(camera_name, scene_option=scene_option)
+        return np.isin(seg[:, :, 0], list(geom_ids)) & (seg[:, :, 1] == int(mujoco.mjtObj.mjOBJ_GEOM))
 
     def _camera_pose(self) -> tuple[np.ndarray, np.ndarray]:
         cam_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, "forearm_cam")
@@ -241,6 +283,15 @@ class RoArmSimEnv:
     def _target_position(self) -> np.ndarray:
         site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "target_site")
         return self.data.site_xpos[site_id].copy()
+
+    def _target_visibility_keypoints(self) -> dict[str, np.ndarray]:
+        return {
+            "center": self.data.site_xpos[mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "target_site")].copy(),
+            "left_base": self.data.site_xpos[mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "target_left_grasp_base")].copy(),
+            "left_mid": self.data.site_xpos[mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "target_left_grasp_mid")].copy(),
+            "right_base": self.data.site_xpos[mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "target_right_grasp_base")].copy(),
+            "right_mid": self.data.site_xpos[mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "target_right_grasp_mid")].copy(),
+        }
 
     def _grasp_site_local_positions(self) -> dict[str, np.ndarray]:
         return {
@@ -307,6 +358,63 @@ class RoArmSimEnv:
             return 0.0
         return float(min(radius / 10.0, 1.0))
 
+    def target_visible_pixels(self, *, robot_hidden: bool = False) -> int:
+        scene_option = self.robot_hidden_scene_option if robot_hidden else None
+        mask = self._visible_geom_mask(self.target_visible_geom_ids, "forearm_cam", scene_option=scene_option)
+        return int(mask.sum())
+
+    def target_visible_component_count(self) -> int:
+        seg = self._segmentation_image("forearm_cam")
+        geom_ids = seg[:, :, 0]
+        obj_types = seg[:, :, 1]
+        visible = 0
+        for geom_id in self.target_visible_geom_ids:
+            if np.any((geom_ids == geom_id) & (obj_types == int(mujoco.mjtObj.mjOBJ_GEOM))):
+                visible += 1
+        return visible
+
+    def gripper_visible_pixels(self) -> int:
+        return int(self._visible_geom_mask(self.gripper_visible_geom_ids, "forearm_cam").sum())
+
+    def gripper_intrusion_ratio(self) -> float:
+        target_mask = self._visible_geom_mask(self.target_visible_geom_ids, "forearm_cam")
+        target_pixels = int(target_mask.sum())
+        if target_pixels <= 0:
+            return 1.0
+        gripper_mask = self._visible_geom_mask(self.gripper_visible_geom_ids, "forearm_cam")
+        if not np.any(gripper_mask):
+            return 0.0
+        ys, xs = np.nonzero(target_mask)
+        y0 = max(int(ys.min()) - 6, 0)
+        y1 = min(int(ys.max()) + 7, target_mask.shape[0])
+        x0 = max(int(xs.min()) - 6, 0)
+        x1 = min(int(xs.max()) + 7, target_mask.shape[1])
+        intrusion_pixels = int(gripper_mask[y0:y1, x0:x1].sum())
+        return float(intrusion_pixels / max(1, target_pixels))
+
+    def target_occlusion_ratio(self) -> float:
+        visible_pixels = self.target_visible_pixels(robot_hidden=False)
+        unoccluded_pixels = self.target_visible_pixels(robot_hidden=True)
+        if unoccluded_pixels <= 0:
+            return 1.0
+        ratio = 1.0 - (float(visible_pixels) / float(unoccluded_pixels))
+        return float(np.clip(ratio, 0.0, 1.0))
+
+    def target_keypoint_visibility_ratio(self) -> float:
+        visible = 0
+        keypoints = self._target_visibility_keypoints()
+        for position in keypoints.values():
+            is_visible, _, _, _ = self._project_object(position)
+            visible += int(is_visible)
+        return float(visible / max(1, len(keypoints)))
+
+    def target_completeness_ready(self) -> bool:
+        return (
+            self.target_keypoint_visibility_ratio() >= 0.8
+            and self.target_visible_component_count() >= 4
+            and self.target_visible_pixels() >= 40
+        )
+
     def center_error_px(self) -> float:
         visible, px, py, _ = self._project_object(self._target_position())
         if not visible:
@@ -348,6 +456,11 @@ class RoArmSimEnv:
         half_extent = np.asarray([0.05 + margin, 0.05 + margin], dtype=np.float64)
         return bool(np.all(np.abs(target_xy - drop_xy) <= half_extent))
 
+    def _target_dropzone_xy_distance(self) -> float:
+        target_xy = self._target_body_position()[:2]
+        drop_xy = self._dropzone_position()[:2]
+        return float(np.linalg.norm(target_xy - drop_xy))
+
     def pregrasp_ready(self) -> bool:
         return (
             self.visibility_score() > 0.15
@@ -365,12 +478,23 @@ class RoArmSimEnv:
     def verify_ready(self) -> bool:
         return (
             self.visibility_score() > 0.14
-            and self.center_error_px() < self._scaled_px(18.0)
+            and self.center_error_px() < self._scaled_px(12.0)
+            and self.target_completeness_ready()
+        )
+
+    def clear_view_ready(self) -> bool:
+        return (
+            self.visibility_score() > 0.16
+            and self.center_error_px() < self._scaled_px(30.0)
+            and self.target_keypoint_visibility_ratio() >= 1.0
+            and self.target_visible_component_count() >= 4
+            and self.target_visible_pixels() >= 30
+            and self.target_occlusion_ratio() <= 0.12
         )
 
     def task_success(self) -> int:
         if self.task_name == "level1_verify":
-            return int(self.verify_ready())
+            return int(self.clear_view_ready())
         if self.task_name == "level2_approach":
             return int(self.approach_success_ready())
         return int(self.placed)
@@ -581,4 +705,5 @@ class RoArmSimEnv:
 
     def close(self) -> None:
         self.obs_renderer.close()
+        self.seg_renderer.close()
         self.debug_renderer.close()

@@ -7,7 +7,7 @@ import numpy as np
 
 from ttla.config import load_config
 from ttla.sim import ContinuousRoArmSimEnv, ContinuousWaypointExpert
-from ttla.sim.context import neutral_context
+from ttla.sim.context import full_context_vector, neutral_context
 from ttla.utils.io import ensure_dir, save_npz
 
 
@@ -36,6 +36,9 @@ def collect_split(
     tasks = []
     success = []
     contexts = []
+    contexts_full = []
+    target_init_pos = []
+    drop_init_pos = []
     episode_ids = []
     step_ids = []
     task_text = []
@@ -57,6 +60,9 @@ def collect_split(
             context = neutral_context() if context_mode == "neutral" else None
             env.reset(task_name=task_name, context=context)
             expert.reset(task_name=task_name)
+            episode_context_full = full_context_vector(env.context)
+            episode_target_init = env._target_body_position().astype(np.float32).copy()
+            episode_drop_init = env._dropzone_position().astype(np.float32).copy()
             done = False
             step_idx = 0
             episode_transitions = []
@@ -83,6 +89,9 @@ def collect_split(
                 tasks.append(transition.task_id)
                 success.append(transition.success)
                 contexts.append(transition.context)
+                contexts_full.append(episode_context_full)
+                target_init_pos.append(episode_target_init)
+                drop_init_pos.append(episode_drop_init)
                 episode_ids.append(episode_id)
                 step_ids.append(local_step_idx)
                 task_text.append(TASK_TEXT_BY_ID[int(transition.task_id)])
@@ -99,6 +108,9 @@ def collect_split(
         "tasks": np.asarray(tasks, dtype=np.int64),
         "success": np.asarray(success, dtype=np.int64),
         "contexts": np.asarray(contexts, dtype=np.float32),
+        "contexts_full": np.asarray(contexts_full, dtype=np.float32),
+        "target_init_pos": np.asarray(target_init_pos, dtype=np.float32),
+        "drop_init_pos": np.asarray(drop_init_pos, dtype=np.float32),
         "episode_ids": np.asarray(episode_ids, dtype=np.int64),
         "step_ids": np.asarray(step_ids, dtype=np.int64),
         "task_text": np.asarray(task_text, dtype=object),

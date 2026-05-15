@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import mujoco
 import numpy as np
 
 from .context import context_vector
@@ -54,6 +55,15 @@ class ContinuousRoArmSimEnv(RoArmSimEnv):
     def task_text(self) -> str:
         return TASK_TEXT[self.task_name]
 
+    def _settle_released_target(self) -> None:
+        target_xy = self._target_body_position()[:2].copy()
+        target_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "target")
+        self.model.body_pos[target_body] = np.asarray([target_xy[0], target_xy[1], 0.040], dtype=np.float64)
+        mujoco.mj_forward(self.model, self.data)
+
+    def _target_in_dropzone(self) -> bool:
+        return bool(self._target_xy_in_dropzone() and self._target_body_position()[2] <= 0.050)
+
     def _clip_action(self, action: np.ndarray) -> np.ndarray:
         action = np.asarray(action, dtype=np.float32).reshape(-1)
         if action.shape != (6,):
@@ -70,7 +80,7 @@ class ContinuousRoArmSimEnv(RoArmSimEnv):
             raise KeyError(f"Unsupported control mode: {self.control_mode}")
         self._apply_target_pose(target_qpos, dwell=1)
 
-    def _update_continuous_manipulation_state(self, was_attached: bool, before_z: float) -> None:
+    def _update_continuous_manipulation_state(self, was_attached: bool, before_z: float, action: np.ndarray) -> None:
         if not self.object_attached:
             if (
                 self._gripper_firmly_closed()
@@ -88,10 +98,18 @@ class ContinuousRoArmSimEnv(RoArmSimEnv):
                 self.lifted = False
                 self.release_counter = 0
                 self._update_attached_object_pose()
+        elif (
+            float(action[5]) > 0.12
+            and self._target_dropzone_xy_distance() <= 0.030
+            and self._target_body_position()[2] <= 0.070
+        ):
+            self.object_attached = False
+            self.release_counter = 0
         if self.object_attached and self._ee_position()[2] > before_z + 0.015:
             self.lifted = True
         if was_attached and not self.object_attached:
-            self.placed = bool(self._target_xy_in_dropzone())
+            self._settle_released_target()
+            self.placed = self._target_in_dropzone()
 
     def step_action(self, action: np.ndarray) -> tuple[dict[str, np.ndarray], float, bool, dict]:
         action = self._clip_action(action)
@@ -99,7 +117,7 @@ class ContinuousRoArmSimEnv(RoArmSimEnv):
         was_attached = bool(self.object_attached)
         before_z = float(self._ee_position()[2])
         self._apply_continuous_action(action)
-        self._update_continuous_manipulation_state(was_attached, before_z)
+        self._update_continuous_manipulation_state(was_attached, before_z, action)
         self.verified = self.verify_ready()
         self.step_idx += 1
         next_obs = self._observation()

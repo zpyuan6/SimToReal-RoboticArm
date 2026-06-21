@@ -471,8 +471,13 @@ def main() -> None:
     _cfg = load_config(session_spec.get("config", args.config))
     deploy_cfg = load_config(session_spec.get("deploy_config", args.deploy_config))
     deploy_cfg.setdefault("runtime", {})
+    deploy_cfg.setdefault("serial", {})
     if "primitive_sleep_s" in session_spec:
         deploy_cfg["runtime"]["primitive_sleep_s"] = float(session_spec["primitive_sleep_s"])
+    if "motion_spd" in session_spec:
+        deploy_cfg["serial"]["spd"] = int(session_spec["motion_spd"])
+    if "motion_acc" in session_spec:
+        deploy_cfg["serial"]["acc"] = int(session_spec["motion_acc"])
     output_root = ensure_dir(session_spec.get("output_root", "data/real_v2/transitions"))
     session_dir = ensure_dir(output_root / f"{session_key}_{_timestamp()}")
     frames_dir = ensure_dir(session_dir / "frames")

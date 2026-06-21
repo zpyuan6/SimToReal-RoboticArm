@@ -9,9 +9,11 @@ import numpy as np
 
 
 class RoArmSerialClient:
-    def __init__(self, port: str, baudrate: int, timeout: float = 0.2) -> None:
+    def __init__(self, port: str, baudrate: int, timeout: float = 0.2, spd: int = 10, acc: int = 10) -> None:
         self.serial = serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
         self.last_command: str | None = None
+        self.spd = int(spd)
+        self.acc = int(acc)
         time.sleep(1.0)
 
     def send(self, payload: dict) -> str:
@@ -40,8 +42,8 @@ class RoArmSerialClient:
                 "t": float(angles_deg[3]),
                 "r": float(angles_deg[4]),
                 "h": float(angles_deg[5]),
-                "spd": 10,
-                "acc": 10,
+                "spd": self.spd,
+                "acc": self.acc,
             }
         )
 

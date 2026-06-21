@@ -2,8 +2,10 @@ shared:
   config: configs/base.yaml
   deploy_config: configs/deployment_l3.yaml
   output_root: data/real_v2/transitions
-  primitive_sleep_s: 2.0
-  post_primitive_settle_s: 2.0
+  motion_spd: 25
+  motion_acc: 25
+  primitive_sleep_s: 1.2
+  post_primitive_settle_s: 0.8
   repeats: 4
   reset_between_episodes: true
   auto_start: false

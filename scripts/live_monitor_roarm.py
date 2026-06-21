@@ -74,7 +74,6 @@ def _draw_panel(
     session_dir: Path,
     targets: dict[str, float],
     last_command: str,
-    last_feedback: str,
     last_feedback_joints: dict[str, float] | None,
     serial_enabled: bool,
     snapshot_count: int,
@@ -110,14 +109,13 @@ def _draw_panel(
         for line in feedback_lines:
             cv2.putText(panel, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (24, 92, 56), 1)
             y += 22
+    else:
+        cv2.putText(panel, "Feedback b/s/e: unavailable", (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (120, 120, 120), 1)
+        y += 22
 
-    cv2.putText(panel, "Last command", (12, 320), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (35, 35, 35), 1)
-    cv2.putText(panel, last_command[:44], (12, 346), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (55, 55, 55), 1)
-    cv2.putText(panel, last_command[44:88], (12, 366), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (55, 55, 55), 1)
-
-    cv2.putText(panel, "Last feedback", (12, 404), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (35, 35, 35), 1)
-    cv2.putText(panel, last_feedback[:44], (12, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (55, 55, 55), 1)
-    cv2.putText(panel, last_feedback[44:88], (12, 450), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (55, 55, 55), 1)
+    cv2.putText(panel, "Last command", (12, 372), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (35, 35, 35), 1)
+    cv2.putText(panel, last_command[:44], (12, 398), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (55, 55, 55), 1)
+    cv2.putText(panel, last_command[44:88], (12, 418), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (55, 55, 55), 1)
     return np.concatenate([frame, panel], axis=1)
 
 
@@ -149,7 +147,6 @@ def main() -> None:
                 session_dir,
                 targets,
                 last_command,
-                last_feedback,
                 last_feedback_joints,
                 serial_enabled,
                 snapshot_count,

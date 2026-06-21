@@ -22,6 +22,46 @@ from ttla.utils.io import ensure_dir, save_npz, write_json
 PREVIEW_WINDOW_NAME = "TTLA Real Collection Preview"
 
 
+class CameraFrameBuffer:
+    def __init__(self, camera) -> None:
+        self.camera = camera
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._frame: np.ndarray | None = None
+        self._error: BaseException | None = None
+        self._thread.start()
+
+    def _read_loop(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                frame = self.camera.read()
+            except BaseException as exc:  # Keep the main thread in charge of reporting failures.
+                with self._lock:
+                    self._error = exc
+                time.sleep(0.05)
+                continue
+            with self._lock:
+                self._frame = frame
+                self._error = None
+
+    def read(self, timeout_s: float = 2.0) -> np.ndarray:
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            with self._lock:
+                if self._frame is not None:
+                    return self._frame.copy()
+                error = self._error
+            if error is not None:
+                raise RuntimeError("Failed to read frame from USB camera.") from error
+            time.sleep(0.02)
+        raise RuntimeError("Timed out waiting for USB camera frame.")
+
+    def close(self) -> None:
+        self._stop_event.set()
+        self._thread.join(timeout=1.0)
+
+
 @dataclass
 class RuntimeFlags:
     attached: bool = False
@@ -258,7 +298,7 @@ def _draw_execution_preview(
 
 
 def _preview_and_confirm_start(
-    runner: DeploymentRunner,
+    frame_buffer: CameraFrameBuffer,
     episode_name: str,
     task_name: str,
     layout_tag: str,
@@ -288,7 +328,7 @@ def _preview_and_confirm_start(
     input_thread.start()
     try:
         while not decision_ready.is_set():
-            frame = runner.camera.read()
+            frame = frame_buffer.read()
             dashboard = _draw_live_preview(
                 frame,
                 episode_name=episode_name,
@@ -306,6 +346,7 @@ def _preview_and_confirm_start(
 
 def _run_primitive_with_live_preview(
     runner: DeploymentRunner,
+    frame_buffer: CameraFrameBuffer,
     primitive_idx: int,
     episode_name: str,
     task_name: str,
@@ -325,7 +366,7 @@ def _run_primitive_with_live_preview(
     worker.start()
     primitive_label = primitive_name(primitive_idx)
     while not done_event.is_set():
-        frame = runner.camera.read()
+        frame = frame_buffer.read()
         dashboard = _draw_execution_preview(
             frame,
             episode_name=episode_name,
@@ -338,7 +379,7 @@ def _run_primitive_with_live_preview(
         cv2.waitKey(50)
 
     worker.join(timeout=0.1)
-    frame = runner.camera.read()
+    frame = frame_buffer.read()
     dashboard = _draw_execution_preview(
         frame,
         episode_name=episode_name,
@@ -431,6 +472,7 @@ def main() -> None:
     frame_size: tuple[int, int] | None = None
 
     runner = DeploymentRunner(deploy_cfg)
+    frame_buffer = CameraFrameBuffer(runner.camera)
     next_episode_id = 0
 
     try:
@@ -450,7 +492,7 @@ def main() -> None:
             if not auto_start:
                 if live_preview:
                     should_continue = _preview_and_confirm_start(
-                        runner,
+                        frame_buffer,
                         episode_name=episode_name,
                         task_name=task_name,
                         layout_tag=layout_tag,
@@ -484,7 +526,7 @@ def main() -> None:
             local_step_records: list[dict[str, Any]] = []
 
             for step_index, primitive_idx in enumerate(primitive_sequence):
-                before = runner.camera.read()
+                before = frame_buffer.read()
                 if frame_size is None:
                     frame_size = (int(before.shape[1]), int(before.shape[0]))
                 stage_before = supervision_stage_id(task_id, primitive_idx)
@@ -497,6 +539,7 @@ def main() -> None:
                 if live_preview:
                     result = _run_primitive_with_live_preview(
                         runner,
+                        frame_buffer,
                         primitive_idx,
                         episode_name=episode_name,
                         task_name=task_name,
@@ -507,7 +550,7 @@ def main() -> None:
                     result = runner.executor.run(primitive_idx)
                 current_q = runner.executor.current_q.copy()
                 flags.apply(primitive_idx)
-                after = runner.camera.read()
+                after = frame_buffer.read()
                 next_state = build_runtime_state(
                     current_q=current_q,
                     task_id=task_id,
@@ -582,6 +625,7 @@ def main() -> None:
             )
             next_episode_id += 1
     finally:
+        frame_buffer.close()
         runner.close()
         if live_preview:
             cv2.destroyAllWindows()

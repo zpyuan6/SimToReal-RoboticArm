@@ -7,7 +7,7 @@ shared:
   reset_between_episodes: true
   auto_start: false
   auto_accept: false
-  live_preview: false
+  live_preview: true
   save_preview: true
   object_name: wire_ear_cork
   dropzone_name: blue_dropzone

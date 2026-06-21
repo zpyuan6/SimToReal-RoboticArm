@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -203,10 +204,8 @@ def _draw_live_preview(
         for chunk_start in range(0, len(line), 44):
             y = _put(line[chunk_start : chunk_start + 44], y, 0.46, (76, 82, 94), 1)
     y = min(y + 10, 520)
-    y = _put("Controls:", y, 0.62, (52, 64, 92), 1)
-    y = _put("Enter / Space: start episode", y, 0.48, (76, 82, 94), 1)
-    y = _put("Q / Esc: quit session", y, 0.48, (76, 82, 94), 1)
-    y = _put("Check target stays in the required band.", y + 8, 0.48, (76, 82, 94), 1)
+    y = _put("Terminal controls this step.", y, 0.56, (52, 64, 92), 1)
+    y = _put("Use the preview to judge placement.", y + 8, 0.48, (76, 82, 94), 1)
 
     return np.concatenate([view, panel], axis=1)
 
@@ -221,22 +220,36 @@ def _preview_and_confirm_start(
 ) -> bool:
     cv2.namedWindow(PREVIEW_WINDOW_NAME, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_EXPANDED)
     cv2.resizeWindow(PREVIEW_WINDOW_NAME, 1280, 680)
-    while True:
-        frame = runner.camera.read()
-        dashboard = _draw_live_preview(
-            frame,
-            episode_name=episode_name,
-            task_name=task_name,
-            layout_tag=layout_tag,
-            primitive_sequence=primitive_sequence,
-            placement_guide=placement_guide,
-        )
-        cv2.imshow(PREVIEW_WINDOW_NAME, dashboard)
-        key = cv2.waitKey(50) & 0xFF
-        if key in (13, 32):
-            return True
-        if key in (ord("q"), 27):
-            return False
+    stop_event = threading.Event()
+
+    def _preview_loop() -> None:
+        while not stop_event.is_set():
+            frame = runner.camera.read()
+            dashboard = _draw_live_preview(
+                frame,
+                episode_name=episode_name,
+                task_name=task_name,
+                layout_tag=layout_tag,
+                primitive_sequence=primitive_sequence,
+                placement_guide=placement_guide,
+            )
+            cv2.imshow(PREVIEW_WINDOW_NAME, dashboard)
+            cv2.waitKey(50)
+
+    thread = threading.Thread(target=_preview_loop, daemon=True)
+    thread.start()
+    print()
+    print(f"[{episode_name}] task={task_name} layout={layout_tag}")
+    print("Sequence:", " -> ".join(primitive_name(pid) for pid in primitive_sequence))
+    if placement_guide:
+        print("Placement guide:")
+        for guide in placement_guide:
+            print(f"  - {guide}")
+    try:
+        return _prompt_continue("Check the preview window, then press Enter to execute or q to stop: ")
+    finally:
+        stop_event.set()
+        thread.join(timeout=1.0)
 
 
 def _prompt_accept() -> str:

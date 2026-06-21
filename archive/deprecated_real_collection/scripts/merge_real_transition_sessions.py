@@ -15,6 +15,11 @@ from ttla.utils.io import ensure_dir, save_npz, write_json
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--allow-deprecated",
+        action="store_true",
+        help="Allow running the deprecated primitive-transition merger.",
+    )
     parser.add_argument("--root", required=True, help="Directory containing collected transition session subdirectories.")
     parser.add_argument("--output-dir", default="data/real_v2/merged")
     parser.add_argument("--plan", default=None, help="Optional YAML plan used to report missing collection episodes.")
@@ -312,6 +317,12 @@ def _summarize_collection_status(
 
 def main() -> None:
     args = _parse_args()
+    if not args.allow_deprecated:
+        raise SystemExit(
+            "scripts/merge_real_transition_sessions.py is deprecated for the current ACT/Diffusion "
+            "continuous-control workflow. Use scripts/merge_continuous_real_sessions.py instead. If you "
+            "intentionally need the old primitive-transition merger, rerun with --allow-deprecated."
+        )
     root = Path(args.root)
     output_dir = ensure_dir(args.output_dir)
     requested_roles = set(args.roles)

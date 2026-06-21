@@ -6,6 +6,12 @@
 
 这套协议用于当前冻结版 ACT/Diffusion 连续控制策略的 sim-to-real adapter。它替代旧的 primitive-transition 采集路径。
 
+当前采集入口也可从 `docs/REAL_DATA_COLLECTION_CURRENT.md` 查看。
+
+旧 primitive-transition 采集文件已经移到 `archive/deprecated_real_collection/`，不要从归档目录中运行它们采集当前数据。
+
+这些归档文件会生成 `data/real_v2` 下的 primitive-transition 数据，字段包括 `primitive_ids`、`stage_ids`、`states`、`next_states`，不能直接用于当前 ACT/Diffusion continuous adapter。
+
 ## 0. 先理解这套采集在做什么
 
 采集方式：

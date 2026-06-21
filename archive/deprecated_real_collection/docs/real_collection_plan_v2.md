@@ -1,3 +1,19 @@
+# DEPRECATED: Real Collection Plan v2
+
+This protocol is deprecated for the current ACT/Diffusion continuous-control experiments.
+
+Do not use this file, `configs/real_collection_plan_v2.yaml`, `scripts/collect_real_transition_session.py`, or `scripts/merge_real_transition_sessions.py` for the current paper-grade real transition collection. Those files produce primitive-transition data under `data/real_v2` with fields such as `primitive_ids`, `stage_ids`, `states`, and `next_states`.
+
+The current ACT/Diffusion adapter workflow requires continuous action datasets with `actions`, `proprio`, `next_proprio`, `action_joint_target`, and `action_joint_delta`.
+
+Use instead:
+
+- `docs/continuous_real_collection_protocol_v1.md`
+- `configs/continuous_real_collection_plan_v1.yaml`
+- `scripts/collect_continuous_real_calibration.py`
+- `scripts/inspect_continuous_real_dataset.py`
+- `scripts/merge_continuous_real_sessions.py`
+
 # Real Collection Plan v2
 
 This document is the operator-facing protocol for new real-data collection. It is meant to be sufficient on its own: after reading this file and [real_collection_plan_v2.yaml](/F:/RoboticArm/configs/real_collection_plan_v2.yaml), you should know what to collect, how to place the target, how to reject a bad episode, and what good preview videos should look like.

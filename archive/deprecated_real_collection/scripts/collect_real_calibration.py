@@ -22,7 +22,19 @@ def main() -> None:
     parser.add_argument("--primitives", default="0,1,2,3")
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--task-id", type=int, default=0)
+    parser.add_argument(
+        "--allow-deprecated",
+        action="store_true",
+        help="Allow running the deprecated primitive calibration collector.",
+    )
     args = parser.parse_args()
+    if not args.allow_deprecated:
+        raise SystemExit(
+            "scripts/collect_real_calibration.py is deprecated for the current ACT/Diffusion "
+            "continuous-control workflow. Use scripts/collect_continuous_real_calibration.py with "
+            "configs/continuous_real_collection_plan_v1.yaml instead. If you intentionally need this "
+            "old primitive collector, rerun with --allow-deprecated."
+        )
     cfg = load_config(args.config)
     deploy_cfg = load_config(args.deploy_config)
     runner = DeploymentRunner(deploy_cfg)

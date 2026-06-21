@@ -1,3 +1,9 @@
+# DEPRECATED: Real Collection Operator Checklist
+
+This checklist is deprecated for the current ACT/Diffusion continuous-control experiments.
+
+It points to the old primitive-transition collection path and writes data under `data/real_v2`. Do not use it for current real adapter training. Use `docs/continuous_real_collection_protocol_v1.md` instead.
+
 # Real Collection Operator Checklist
 
 This is the short, execution-focused version of the real collection protocol.

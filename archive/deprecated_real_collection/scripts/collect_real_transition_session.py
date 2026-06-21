@@ -88,6 +88,11 @@ class RuntimeFlags:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--allow-deprecated",
+        action="store_true",
+        help="Allow running the deprecated primitive-transition collector.",
+    )
     parser.add_argument("--config", default="configs/base.yaml")
     parser.add_argument("--deploy-config", default="configs/deployment.yaml")
     parser.add_argument("--plan", default=None, help="YAML collection plan.")
@@ -512,6 +517,13 @@ def _write_preview(session_dir: Path, entries: list[dict[str, Any]], frame_size:
 
 def main() -> None:
     args = _parse_args()
+    if not args.allow_deprecated:
+        raise SystemExit(
+            "scripts/collect_real_transition_session.py is deprecated for the current ACT/Diffusion "
+            "continuous-control workflow. Use scripts/collect_continuous_real_calibration.py with "
+            "configs/continuous_real_collection_plan_v1.yaml instead. If you intentionally need the old "
+            "primitive-transition collector, rerun with --allow-deprecated."
+        )
     session_spec, session_key = _load_plan_session(args)
     _cfg = load_config(session_spec.get("config", args.config))
     deploy_cfg = load_config(session_spec.get("deploy_config", args.deploy_config))

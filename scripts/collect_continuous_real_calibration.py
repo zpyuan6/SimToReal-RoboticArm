@@ -338,7 +338,8 @@ def main() -> None:
             sequence_name = str(sequence["name"])
             waypoints = [str(value) for value in sequence["waypoints"]]
             sequence_repeats = int(sequence.get("repeats", repeats))
-            for repeat_idx in range(sequence_repeats):
+            repeat_idx = 0
+            while repeat_idx < sequence_repeats:
                 episode_name = f"{sequence_name}_r{repeat_idx:02d}"
                 planned = _planned_targets(waypoints, start_q=REAL_HOME_QPOS, max_step=max_step)
                 if not auto_start:
@@ -400,7 +401,7 @@ def main() -> None:
                 if decision == "quit":
                     raise KeyboardInterrupt
                 if decision == "redo":
-                    print(f"redo_episode={episode_name}", flush=True)
+                    print(f"redo_episode={episode_name}; retrying same planned episode", flush=True)
                     continue
                 all_records.extend(local_records)
                 episode_meta.append(
@@ -414,6 +415,7 @@ def main() -> None:
                     }
                 )
                 next_episode_id += 1
+                repeat_idx += 1
     except KeyboardInterrupt:
         print("collection_stopped=true", flush=True)
     finally:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +31,8 @@ from ttla.sim.task_defs import TASK_TO_ID
 from ttla.task_runtime import build_runtime_state
 from ttla.utils.io import ensure_dir, save_npz, write_json
 
+
+LIVE_WINDOW_NAME = "Continuous Real Collection Camera"
 
 TASK_TEXT_BY_ID = {
     0: "center the target object in the camera view",
@@ -126,6 +129,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--auto-start", action="store_true")
     parser.add_argument("--auto-accept", action="store_true")
     parser.add_argument("--save-preview", action="store_true")
+    parser.add_argument("--live-preview", dest="live_preview", action="store_true", default=None)
+    parser.add_argument("--no-live-preview", dest="live_preview", action="store_false")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -166,6 +171,8 @@ def _session_spec(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
         spec["auto_accept"] = True
     if args.save_preview:
         spec["save_preview"] = True
+    if args.live_preview is not None:
+        spec["live_preview"] = bool(args.live_preview)
     if not spec.get("sequences"):
         raise ValueError(f"Session {args.session!r} does not define sequences.")
     return spec, args.session
@@ -247,6 +254,46 @@ def _prompt_accept() -> str:
         print("Please enter k / r / q.")
 
 
+def _show_live_frame(frame: np.ndarray, enabled: bool) -> None:
+    if not enabled:
+        return
+    cv2.imshow(LIVE_WINDOW_NAME, frame)
+    cv2.waitKey(1)
+
+
+def _prompt_continue_with_live_preview(camera: Any, prompt: str, enabled: bool) -> bool:
+    if not enabled:
+        return _prompt_continue(prompt)
+
+    cv2.namedWindow(LIVE_WINDOW_NAME, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_EXPANDED)
+    decision_ready = threading.Event()
+    decision: dict[str, bool] = {"continue": False}
+
+    def _read_terminal_decision() -> None:
+        try:
+            decision["continue"] = _prompt_continue(prompt)
+        finally:
+            decision_ready.set()
+
+    input_thread = threading.Thread(target=_read_terminal_decision, daemon=True)
+    input_thread.start()
+    while not decision_ready.is_set():
+        _show_live_frame(camera.read(), enabled=True)
+        time.sleep(0.03)
+    input_thread.join(timeout=0.1)
+    return bool(decision["continue"])
+
+
+def _sleep_with_live_preview(camera: Any, seconds: float, enabled: bool) -> None:
+    if not enabled:
+        time.sleep(seconds)
+        return
+    deadline = time.time() + max(0.0, seconds)
+    while time.time() < deadline:
+        _show_live_frame(camera.read(), enabled=True)
+        time.sleep(min(0.03, max(0.0, deadline - time.time())))
+
+
 def _write_preview(session_dir: Path, records: list[TransitionRecord], frame_size: tuple[int, int]) -> None:
     if not records:
         return
@@ -317,6 +364,7 @@ def main() -> None:
     auto_accept = bool(spec.get("auto_accept", False))
     reset_between_episodes = bool(spec.get("reset_between_episodes", True))
     save_preview = bool(spec.get("save_preview", False))
+    live_preview = bool(spec.get("live_preview", True))
     selected_formats = _action_formats(str(spec.get("action_format", "both")))
 
     if args.dry_run:
@@ -347,7 +395,7 @@ def main() -> None:
                         f"[{episode_name}] task={task_name} waypoints={waypoints} "
                         f"substeps={len(planned)}. Press Enter to execute or q to stop: "
                     )
-                    if not _prompt_continue(prompt):
+                    if not _prompt_continue_with_live_preview(camera, prompt, live_preview):
                         raise KeyboardInterrupt
                 if reset_between_episodes:
                     robot.reset_pose()
@@ -356,6 +404,7 @@ def main() -> None:
                 local_records: list[TransitionRecord] = []
                 for local_step, (waypoint_name, target_q) in enumerate(planned):
                     before = camera.read()
+                    _show_live_frame(before, live_preview)
                     if frame_size is None:
                         frame_size = (int(before.shape[1]), int(before.shape[0]))
                     before_dataset = _dataset_frame(before, image_hw)
@@ -366,8 +415,9 @@ def main() -> None:
                         horizon=len(planned),
                     )
                     robot.move_joint_vector(target_q)
-                    time.sleep(step_sleep_s)
+                    _sleep_with_live_preview(camera, step_sleep_s, live_preview)
                     after = camera.read()
+                    _show_live_frame(after, live_preview)
                     after_dataset = _dataset_frame(after, image_hw)
                     next_state = build_runtime_state(
                         current_q=target_q,
@@ -421,6 +471,8 @@ def main() -> None:
     finally:
         camera.close()
         robot.close()
+        if live_preview:
+            cv2.destroyAllWindows()
 
     dataset_paths: dict[str, str] = {}
     for action_format in selected_formats:

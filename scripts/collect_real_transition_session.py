@@ -418,6 +418,13 @@ def main() -> None:
             episode_name = f"{episode_spec['name']}_r{episode_spec['repeat_idx']:02d}"
             layout_tag = str(episode_spec.get("layout_tag", "unspecified"))
             primitive_sequence = list(episode_spec["primitive_ids"])
+
+            if reset_between_episodes:
+                print(f"[{episode_name}] resetting to standard pose before preview...")
+                runner.robot.reset_pose()
+                time.sleep(1.5)
+                runner.executor.current_q = REAL_HOME_QPOS.copy()
+
             if not auto_start:
                 should_continue = _preview_and_confirm_start(
                     runner,
@@ -430,10 +437,6 @@ def main() -> None:
                 if not should_continue:
                     break
 
-            if reset_between_episodes:
-                runner.robot.reset_pose()
-                time.sleep(1.5)
-                runner.executor.current_q = REAL_HOME_QPOS.copy()
             current_q = runner.executor.current_q.copy()
             flags = RuntimeFlags()
 

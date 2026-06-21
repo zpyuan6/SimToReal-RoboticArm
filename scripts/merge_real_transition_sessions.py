@@ -108,6 +108,50 @@ def _write_manifest(path: Path, rows: list[dict[str, Any]]) -> None:
     pd.DataFrame.from_records(rows).to_csv(path, index=False)
 
 
+def _format_count(value: Any) -> str:
+    if value in {"", None}:
+        return "?"
+    return str(int(value))
+
+
+def _print_collection_status(status_by_session: list[dict[str, Any]], status_by_sequence: list[dict[str, Any]]) -> None:
+    if not status_by_session:
+        return
+    print("collection_status_by_session:")
+    for row in status_by_session:
+        missing = int(row.get("missing_episodes", 0) or 0)
+        extra = int(row.get("extra_episodes", 0) or 0)
+        suffix_parts = []
+        if missing:
+            suffix_parts.append(f"missing={missing}")
+        if extra:
+            suffix_parts.append(f"extra={extra}")
+        suffix = "" if not suffix_parts else " " + " ".join(suffix_parts)
+        print(
+            f"  {row['session_key']}: "
+            f"{_format_count(row.get('collected_episodes'))}/{_format_count(row.get('expected_episodes'))}"
+            f"{suffix}"
+        )
+
+    if not status_by_sequence:
+        return
+    print("collection_status_by_sequence:")
+    for row in status_by_sequence:
+        missing = int(row.get("missing_episodes", 0) or 0)
+        extra = int(row.get("extra_episodes", 0) or 0)
+        suffix_parts = []
+        if missing:
+            suffix_parts.append(f"missing={missing}")
+        if extra:
+            suffix_parts.append(f"extra={extra}")
+        suffix = "" if not suffix_parts else " " + " ".join(suffix_parts)
+        print(
+            f"  {row['session_key']} / {row['sequence_name']}: "
+            f"{_format_count(row.get('collected_episodes'))}/{_format_count(row.get('expected_episodes'))}"
+            f"{suffix}"
+        )
+
+
 def _sequence_name_from_episode(episode_name: str) -> str:
     if "_r" not in episode_name:
         return episode_name
@@ -347,6 +391,7 @@ def main() -> None:
 
     for role, path in written.items():
         print(f"{role}_merged={path}")
+    _print_collection_status(status_by_session, status_by_sequence)
     missing_rows = [row for row in status_by_session if int(row.get("missing_episodes", 0) or 0) > 0]
     if missing_rows:
         print("missing_collection:")

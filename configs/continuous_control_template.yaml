@@ -5,7 +5,7 @@ control:
   backbone_name: act
   family: continuous_control
   image_shape: [224, 224, 3]
-  proprio_dim: 14
+  proprio_dim: 16
   uses_language: false
   latent_adapter_target: transformer_chunk_latent
   official:

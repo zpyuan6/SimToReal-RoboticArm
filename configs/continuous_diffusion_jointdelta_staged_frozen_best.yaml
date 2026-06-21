@@ -1,0 +1,72 @@
+base_config: continuous_diffusion_jointdelta_staged_nodrop_compact_eval10.yaml
+
+frozen_baseline:
+  name: diffusion_jointdelta_staged_frozen_best_2026_05_28
+  frozen_on: 2026-05-28
+  scope: current best Diffusion baseline for level1_verify, level2_approach, and level3_pick_place
+  promoted_from: configs/continuous_diffusion_jointdelta_staged_nodrop_compact.yaml
+  eval_config: configs/continuous_diffusion_jointdelta_staged_nodrop_compact_eval10.yaml
+  policy_path: outputs/train/lerobot/diffusion_jointdelta_staged_nodrop_compact/checkpoints/012500/pretrained_model
+  selection_rule: best current Diffusion fresh rollout success after joint_delta/no-drop tuning
+  data:
+    train_path: data/continuous_jointdelta_staged_quicktrial/train.npz
+    val_path: data/continuous_jointdelta_staged_quicktrial/val.npz
+    test_path: data/continuous_jointdelta_staged_quicktrial/test.npz
+    lerobot_train_root: data/lerobot/roarm_continuous_train_diffusion_jointdelta_staged_quicktrial
+  training_strategy:
+    control_mode: joint_delta
+    observation: forearm_cam 224x224x3 plus 16-D state
+    state: qpos6, qvel6, task_one_hot3, progress1
+    task_conditioning: task id encoded as one-hot in state
+    staged_resets:
+      level2_approach: reset directly from level1_verify success pose
+      level3_pick_place: reset directly from level2_approach success pose
+    diffusion:
+      implementation: official LeRobot DiffusionPolicy
+      vision_backbone: resnet18
+      n_obs_steps: 2
+      horizon: 8
+      n_action_steps: 2
+      drop_n_last_frames: 0
+      down_dims: [256, 512, 1024]
+      optimizer_lr: 5.0e-5
+      num_inference_steps: 10
+      batch_size: 8
+      best_checkpoint_step: 12500
+  metrics:
+    fresh_rollout:
+      summary_csv: outputs/train/lerobot/diffusion_jointdelta_staged_nodrop_compact/final_rollout_selection/012500_eval10/summary.csv
+      overall_success: 0.19444444444444445
+      level1_verify_success: 0.0
+      level2_approach_success: 0.08333333333333333
+      level3_pick_place_success: 0.5
+    train_exact_replay:
+      summary_csv: results/continuous_exact_replay/diffusion_jointdelta_staged_nodrop_compact_eval10_best_on_train/summary.csv
+      overall_success: 0.37777777777777777
+      level1_verify_success: 0.6133333333333333
+      level2_approach_success: 0.11
+      level3_pick_place_success: 0.41
+    val_exact_replay:
+      summary_csv: results/continuous_exact_replay/diffusion_jointdelta_staged_nodrop_compact_eval10_best_on_val/summary.csv
+      overall_success: 0.36666666666666664
+      level1_verify_success: 0.5
+      level2_approach_success: 0.11666666666666667
+      level3_pick_place_success: 0.48333333333333334
+  non_promoted_followups:
+    - name: diffusion_jointdelta_staged_terminal_reactive1
+      policy_path: outputs/train/lerobot/diffusion_jointdelta_staged_terminal_reactive1/checkpoints/020000/pretrained_model
+      reason: improved exact replay but reduced fresh rollout
+      fresh_overall_success: 0.1388888888888889
+      train_exact_overall_success: 0.4633333333333333
+      val_exact_overall_success: 0.4388888888888889
+    - name: diffusion_jointdelta_staged_reactive1_nofocus
+      policy_path: outputs/train/lerobot/diffusion_jointdelta_staged_reactive1_nofocus/checkpoints/017500/pretrained_model
+      reason: useful n_action_steps=1 ablation but not best fresh rollout
+      fresh_overall_success: 0.16666666666666666
+      train_exact_overall_success: 0.41555555555555557
+      val_exact_overall_success: 0.39444444444444443
+  notes:
+    - This freezes Diffusion as a baseline, not as the main deployment model.
+    - drop_n_last_frames=0 is required for the current short staged episodes.
+    - num_inference_steps=10 is better than default 100-step sampling for this setup.
+    - ACT remains the current best deployable imitation baseline.

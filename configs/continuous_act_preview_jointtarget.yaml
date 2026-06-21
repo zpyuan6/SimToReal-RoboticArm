@@ -1,0 +1,5 @@
+base_config: continuous_act_template.yaml
+
+control:
+  action:
+    control_mode: joint_target

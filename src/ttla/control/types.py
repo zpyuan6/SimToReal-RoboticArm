@@ -32,6 +32,7 @@ class ControlObservationBatch:
     proprio: torch.Tensor
     task_text: list[str] | None = None
     attention_mask: torch.Tensor | None = None
+    task_id: torch.Tensor | int | None = None
 
 
 @dataclass
@@ -39,4 +40,3 @@ class ControlPolicyOutput:
     actions: torch.Tensor
     latent: torch.Tensor
     aux: dict[str, torch.Tensor] = field(default_factory=dict)
-

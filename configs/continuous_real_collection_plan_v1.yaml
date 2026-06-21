@@ -1,0 +1,135 @@
+shared:
+  config: configs/continuous_act_jointtarget_staged_frozen_best.yaml
+  deploy_config: configs/deployment_l3.yaml
+  output_root: data/real_continuous_v1/sessions
+  repeats: 10
+  action_format: both
+  max_joint_step_rad: 0.18
+  step_sleep_s: 0.35
+  reset_between_episodes: true
+  auto_start: false
+  auto_accept: false
+  save_preview: true
+  object_name: wire_ear_cork
+  dropzone_name: blue_dropzone
+  scene_constraints:
+    - 标定集和 held-out 集采集期间，机械臂底座必须固定。
+    - 标定集和 held-out 集采集期间，相机安装位置必须固定。
+    - 标定集和 held-out 集采集期间，蓝色放置区域必须固定。
+    - 如果相机或机械臂底座移动过，需要重新采集完整协议。
+    - 记录运动过程中如果有人手留在相机画面中，该 episode 必须重采。
+  collection_target:
+    purpose: paper_grade_real_transition_collection
+    calibration_episodes_per_task: 30
+    heldout_episodes_per_task: 30
+    total_expected_episodes: 180
+    total_expected_transitions: 2180
+  repeat_placement_policy:
+    - 每一次 repeat 都应轻微调整目标位置或朝向，避免采集完全重复的同一画面。
+    - 标定集只做小扰动，目标仍应保持在 center_band 可达区域内。
+    - held-out 集应使用偏左、偏右、偏前和轻微旋转等不同摆放，但不能放到明显不可达的位置。
+    - L2/L3 的扰动不能破坏预定义 approach/pregrasp/grasp_close 能接近或夹住目标的条件。
+    - 如果某次扰动导致明显失败，应选择 redo，并把目标移回可达但不同于上一条 episode 的位置。
+
+sessions:
+  calib_l1_center:
+    task: level1_verify
+    split_role: calibration
+    layout_tag: center_band
+    notes: 中心区域目标摆放下的观测对准 transition。
+    placement_guide:
+      - 将目标放在 obs_center 视角的中间三分之一区域。
+      - 目标从 obs_left 和 obs_right 视角也应保持可见。
+      - 不要将目标放入蓝色放置区域。
+    sequences:
+      - name: left_center
+        waypoints: [obs_left, obs_center]
+      - name: right_center
+        waypoints: [obs_right, obs_center]
+      - name: center_hold
+        waypoints: [obs_center]
+
+  calib_l2_center:
+    task: level2_approach
+    split_role: calibration
+    layout_tag: center_band
+    notes: 中心区域目标摆放下，从观察位姿到预抓取位姿的连续 transition。
+    placement_guide:
+      - 使用与 L1 相同的中心区域摆放。
+      - reset 时目标应位于夹爪外侧。
+      - 开始采集时夹爪不能已经接触物体。
+    sequences:
+      - name: center_approach
+        waypoints: [obs_center, approach, pregrasp]
+      - name: left_approach
+        waypoints: [obs_left, obs_center, approach, pregrasp]
+      - name: right_approach
+        waypoints: [obs_right, obs_center, approach, pregrasp]
+
+  calib_l3_center:
+    task: level3_pick_place
+    split_role: calibration
+    layout_tag: center_band
+    repeats: 15
+    notes: 中心区域目标摆放下的完整抓取与放置连续 transition。
+    placement_guide:
+      - 使用可达的中心区域目标摆放。
+      - 蓝色放置区域必须固定且可见。
+      - 物体初始位置不能在蓝色放置区域内。
+      - 每次 repeat 可做毫米级位置微调或轻微旋转，但必须保持可稳定夹起。
+    sequences:
+      - name: center_pick_place
+        waypoints: [obs_center, approach, pregrasp, grasp_close, lift, transport, place_release, retreat]
+      - name: left_pick_place
+        waypoints: [obs_left, obs_center, approach, pregrasp, grasp_close, lift, transport, place_release, retreat]
+
+  heldout_l1_offset:
+    task: level1_verify
+    split_role: heldout
+    layout_tag: front_left_front_right
+    notes: 使用不同于标定集摆放位置的 held-out 观测 transition。
+    placement_guide:
+      - 使用向左一个物体宽度、向右一个物体宽度，或向机械臂方向靠近一个物体长度的偏移摆放。
+      - 不要复用标定集的精确摆放位置。
+      - 目标必须完整可见且可达。
+    sequences:
+      - name: left_center
+        waypoints: [obs_left, obs_center]
+      - name: right_center
+        waypoints: [obs_right, obs_center]
+      - name: center_hold
+        waypoints: [obs_center]
+
+  heldout_l2_offset:
+    task: level2_approach
+    split_role: heldout
+    layout_tag: front_left_front_right
+    notes: 使用明显目标偏移的 held-out 接近 transition。
+    placement_guide:
+      - 使用 heldout L1 中定义的偏移摆放。
+      - 目标必须能被脚本化 approach 位姿接近。
+      - 多次 repeat 中交替使用偏左、偏右和偏前的摆放。
+    sequences:
+      - name: center_approach
+        waypoints: [obs_center, approach, pregrasp]
+      - name: left_approach
+        waypoints: [obs_left, obs_center, approach, pregrasp]
+      - name: right_approach
+        waypoints: [obs_right, obs_center, approach, pregrasp]
+
+  heldout_l3_offset:
+    task: level3_pick_place
+    split_role: heldout
+    layout_tag: front_left_front_right
+    repeats: 15
+    notes: 使用不同目标摆放的 held-out 完整抓取与放置 transition。
+    placement_guide:
+      - 使用 calibration L3 中未出现过的偏前、偏左或偏右摆放。
+      - 蓝色放置区域必须固定。
+      - 如果明显抓取失败或发生不安全碰撞，该 episode 必须重采。
+      - 每次 repeat 应在可抓取范围内更换偏移或朝向，不要重复同一个 held-out 摆放。
+    sequences:
+      - name: center_pick_place
+        waypoints: [obs_center, approach, pregrasp, grasp_close, lift, transport, place_release, retreat]
+      - name: left_pick_place
+        waypoints: [obs_left, obs_center, approach, pregrasp, grasp_close, lift, transport, place_release, retreat]

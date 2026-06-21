@@ -1,0 +1,56 @@
+base_config: continuous_act_jointtarget_staged_quicktrial.yaml
+
+frozen_baseline:
+  name: act_jointtarget_staged_frozen_best_2026_05_21
+  frozen_on: 2026-05-21
+  scope: current best unified ACT baseline for level1_verify, level2_approach, and level3_pick_place
+  promoted_from: configs/continuous_act_jointtarget_staged_quicktrial.yaml
+  policy_path: outputs/train/lerobot/act_jointtarget_staged_quicktrial/checkpoints/020000/pretrained_model
+  selection_rule: best overall fresh rollout success from final_rollout_selection
+  data:
+    train_path: data/continuous_jointtarget_staged_quicktrial/train.npz
+    val_path: data/continuous_jointtarget_staged_quicktrial/val.npz
+    test_path: data/continuous_jointtarget_staged_quicktrial/test.npz
+    lerobot_train_root: data/lerobot/roarm_continuous_train_jointtarget_staged_quicktrial
+  training_strategy:
+    control_mode: joint_target
+    observation: forearm_cam 224x224x3 plus 16-D state
+    state: qpos6, qvel6, task_one_hot3, progress1
+    task_conditioning: task id encoded as one-hot in state
+    staged_resets:
+      level2_approach: reset directly from level1_verify success pose
+      level3_pick_place: reset directly from level2_approach success pose
+    act:
+      implementation: official LeRobot ACT
+      vision_backbone: resnet18
+      history_len: 2
+      action_horizon: 2
+      chunk_size: 12
+      n_action_steps: 2
+      batch_size: 8
+      max_steps: 30000
+      save_freq: 2500
+      checkpoint_selection: validation loss for early stop plus final fresh rollout ranking
+  metrics:
+    fresh_rollout:
+      summary_csv: outputs/train/lerobot/act_jointtarget_staged_quicktrial/final_rollout_selection/020000/summary.csv
+      overall_success: 0.5555555555555556
+      level1_verify_success: 0.4166666666666667
+      level2_approach_success: 0.6666666666666666
+      level3_pick_place_success: 0.5833333333333334
+    train_exact_replay:
+      summary_csv: results/continuous_exact_replay/act_jointtarget_staged_quicktrial_best_on_train/summary.csv
+      overall_success: 0.55
+      level1_verify_success: 0.9266666666666666
+      level2_approach_success: 0.45
+      level3_pick_place_success: 0.2733333333333333
+    val_exact_replay:
+      summary_csv: results/continuous_exact_replay/act_jointtarget_staged_quicktrial_valbest_on_val/summary.csv
+      overall_success: 0.5333333333333333
+      level1_verify_success: 0.9333333333333333
+      level2_approach_success: 0.4
+      level3_pick_place_success: 0.26666666666666666
+  notes:
+    - This is the best current unified L1-L3 ACT baseline, not the isolated L2 geometry-state experiment.
+    - L2-subgoal and joint-delta experiments are not promoted because they reduced fresh rollout success.
+    - Geometry-state L2 improved exact replay but did not improve unified fresh rollout, so its generated artifacts were cleaned.

@@ -1,0 +1,7 @@
+base_config: continuous_act_preview_jointtarget.yaml
+
+sim:
+  staged_resets:
+    level2_approach: level1_verify
+    level3_pick_place: level2_approach
+  staged_reset_max_attempts: 12

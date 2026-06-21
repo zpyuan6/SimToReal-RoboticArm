@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from .base import BaseControlBackbone
-from .backbones import ACTBackbone, DiffusionPolicyBackbone, LeRobotOfficialBackbone, LeRobotPolicySpec, SmolVLABackbone
+from .backbones import (
+    ACTBackbone,
+    DiffusionPolicyBackbone,
+    LeRobotOfficialBackbone,
+    LeRobotPolicySpec,
+    SmolVLABackbone,
+    TaskPolicySelectorBackbone,
+)
 from .types import (
     ContinuousActionSpec,
     ControlInterfaceSpec,
@@ -22,6 +29,8 @@ def build_control_backbone(
         return DiffusionPolicyBackbone(interface_spec, official_cfg=official_cfg)
     if key == "smolvla":
         return SmolVLABackbone(interface_spec, official_cfg=official_cfg)
+    if key in {"task_policy_selector", "task_selector"}:
+        return TaskPolicySelectorBackbone(interface_spec, official_cfg=official_cfg)
     raise KeyError(f"Unsupported control backbone scaffold: {backbone_name}")
 
 
@@ -36,5 +45,6 @@ __all__ = [
     "LeRobotOfficialBackbone",
     "LeRobotPolicySpec",
     "SmolVLABackbone",
+    "TaskPolicySelectorBackbone",
     "build_control_backbone",
 ]

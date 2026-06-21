@@ -15,6 +15,7 @@ from .skills import (
     APPROACH_QPOS,
     GRASP_EXECUTE_ID,
     HOME_QPOS,
+    L1_FIXED_OBSERVE_QPOS,
     LIFT_OBJECT_ID,
     LIFT_QPOS,
     OBS_CENTER_ID,
@@ -74,10 +75,13 @@ class RoArmSimEnv:
         self.verified = False
         self.placed = False
         self.lifted = False
+        self.grasp_reference_ee_z: float | None = None
         self.last_primitive = OBS_CENTER_ID
         self.release_counter = 0
         self.recent_ear_contact = 0
         self.active_grasp_local_offset = np.asarray([-0.028, -0.003, -0.069], dtype=np.float64)
+        self.level1_observation_pose_reached = False
+        self.level1_observation_pose_hold_steps = 0
         self.reset()
 
     def _scaled_px(self, reference_px_at_84: float) -> float:
@@ -118,10 +122,13 @@ class RoArmSimEnv:
         self.verified = False
         self.placed = False
         self.lifted = False
+        self.grasp_reference_ee_z = None
         self.last_primitive = OBS_CENTER_ID
         self.release_counter = 0
         self.recent_ear_contact = 0
         self.active_grasp_local_offset = np.asarray([-0.028, -0.003, -0.069], dtype=np.float64)
+        self.level1_observation_pose_reached = False
+        self.level1_observation_pose_hold_steps = 0
         self.action_delay_queue.clear()
         mujoco.mj_resetData(self.model, self.data)
         self.data.qpos[:6] = HOME_QPOS.astype(np.float64)
@@ -271,14 +278,23 @@ class RoArmSimEnv:
     def _state_vector(self) -> np.ndarray:
         qpos = self.data.qpos[:6].astype(np.float32)
         qvel = self.data.qvel[:6].astype(np.float32)
+        task_one_hot = np.zeros(len(TASK_TO_ID), dtype=np.float32)
+        task_one_hot[int(TASK_TO_ID[self.task_name])] = 1.0
         context = np.asarray(
             [
-                float(TASK_TO_ID[self.task_name]),
                 float(self.step_idx / max(1, self.cfg["episode_horizon"])),
             ],
             dtype=np.float32,
         )
-        return np.concatenate([qpos, qvel, context], dtype=np.float32)
+        state_parts = [qpos, qvel, task_one_hot, context]
+        if bool(self.cfg.get("state_include_geometry", False)):
+            state_parts.extend(
+                [
+                    self._target_body_position().astype(np.float32),
+                    self._dropzone_position().astype(np.float32),
+                ]
+            )
+        return np.concatenate(state_parts, dtype=np.float32)
 
     def _target_position(self) -> np.ndarray:
         site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "target_site")
@@ -309,6 +325,10 @@ class RoArmSimEnv:
             "right_mid": self.data.site_xpos[mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "target_right_grasp_mid")].copy(),
         }
 
+    def _target_ear_center_position(self) -> np.ndarray:
+        sites = self._grasp_site_world_positions()
+        return np.mean(np.stack(list(sites.values()), axis=0), axis=0)
+
     def _nearest_grasp_site_name(self) -> str:
         ee = self._ee_position()
         candidates = self._grasp_site_world_positions()
@@ -328,6 +348,25 @@ class RoArmSimEnv:
     def _ee_position(self) -> np.ndarray:
         site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "ee_site")
         return self.data.site_xpos[site_id].copy()
+
+    def _gripper_center_position(self) -> np.ndarray:
+        tip = self._ee_position()
+        hinge = self._gripper_open_joint_position()
+        site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "ee_site")
+        rot = self.data.site_xmat[site_id].reshape(3, 3).copy()
+        local_direction = rot.T @ (hinge - tip)
+        # Retreat from the fingertip only along the gripper's longitudinal axis.
+        # Do not carry the marker upward/downward together with the hinge offset.
+        axial = float(local_direction[0])
+        if abs(axial) <= 1e-8:
+            return tip
+        backoff_m = 0.020
+        local_offset = np.asarray([np.sign(axial) * backoff_m, 0.0, 0.0], dtype=np.float64)
+        return tip + rot @ local_offset
+
+    def _gripper_open_joint_position(self) -> np.ndarray:
+        joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "gripper_open")
+        return self.data.xanchor[joint_id].copy()
 
     def _gripper_closed_enough(self) -> bool:
         return bool(self.data.qpos[5] < 0.42)
@@ -350,6 +389,15 @@ class RoArmSimEnv:
             and self.recent_ear_contact >= 2
             and self.grasp_gap() < 0.09
             and self.center_error_px() < 56.0
+        )
+
+    def _attach_capture_ready(self) -> bool:
+        return bool(
+            self._gripper_firmly_closed()
+            and (
+                self._ear_grasp_contact_count() > 0
+                or self.ee_ear_center_distance() < 0.030
+            )
         )
 
     def visibility_score(self) -> float:
@@ -422,6 +470,13 @@ class RoArmSimEnv:
         center = self.cfg["image_size"] / 2.0
         return float(np.sqrt((px - center) ** 2 + (py - center) ** 2))
 
+    def target_image_offset_px(self) -> tuple[bool, float, float]:
+        visible, px, py, _ = self._project_object(self._target_position())
+        if not visible:
+            return False, 0.0, 0.0
+        center = self.cfg["image_size"] / 2.0
+        return True, float(px - center), float(py - center)
+
     def target_yaw_error(self) -> float:
         target = self._target_grasp_position()
         yaw_target = np.arctan2(target[1], max(target[0], 1e-6))
@@ -429,6 +484,9 @@ class RoArmSimEnv:
 
     def ee_target_distance(self) -> float:
         return float(np.linalg.norm(self._ee_position() - self._target_grasp_position()))
+
+    def ee_ear_center_distance(self) -> float:
+        return float(np.linalg.norm(self._gripper_center_position() - self._target_ear_center_position()))
 
     def grasp_gap(self) -> float:
         # Positive values mean the tool is still outside the nominal ear-capture
@@ -470,9 +528,8 @@ class RoArmSimEnv:
 
     def approach_success_ready(self) -> bool:
         return (
-            self.visibility_score() > 0.14
-            and self.center_error_px() < self._scaled_px(14.0)
-            and self.ee_target_distance() < 0.050
+            self.visibility_score() > 0.10
+            and self.ee_ear_center_distance() < 0.015
         )
 
     def verify_ready(self) -> bool:
@@ -482,19 +539,49 @@ class RoArmSimEnv:
             and self.target_completeness_ready()
         )
 
+    def verified_status(self) -> bool:
+        if self.task_name == "level1_verify":
+            return self.clear_view_ready()
+        return self.verify_ready()
+
     def clear_view_ready(self) -> bool:
+        visible, _, dy = self.target_image_offset_px()
+        horizontal_yaw_limit = np.deg2rad(2.0)
+        desired_upper_third_dy = -float(self.cfg["image_size"]) / 6.0
+        # L1 only needs a stable upper-half framing that stays close to the
+        # upper-third composition target. Keep the one-third target as the
+        # reference, but allow a wider band and a little slack around the
+        # image center line.
+        vertical_target_tolerance = self._scaled_px(24.0)
+        upper_half_limit = self._scaled_px(8.0)
         return (
-            self.visibility_score() > 0.16
-            and self.center_error_px() < self._scaled_px(30.0)
-            and self.target_keypoint_visibility_ratio() >= 1.0
-            and self.target_visible_component_count() >= 4
-            and self.target_visible_pixels() >= 30
-            and self.target_occlusion_ratio() <= 0.12
+            visible
+            and self.visibility_score() > 0.15
+            and abs(self.target_yaw_error()) <= horizontal_yaw_limit
+            and dy <= upper_half_limit
+            and abs(dy - desired_upper_third_dy) <= vertical_target_tolerance
+            and self.target_keypoint_visibility_ratio() >= 0.8
+            and self.target_visible_component_count() >= 2
+            and self.target_visible_pixels() >= 24
+        )
+
+    def level1_fixed_observation_reached(self) -> bool:
+        target = L1_FIXED_OBSERVE_QPOS.astype(np.float64)
+        q = self.data.qpos[:6].astype(np.float64)
+        arm_error = float(np.linalg.norm(q[1:5] - target[1:5]))
+        return bool(
+            abs(q[0] - target[0]) <= 0.05
+            and abs(q[1] - target[1]) <= 0.10
+            and abs(q[2] - target[2]) <= 0.16
+            and abs(q[3] - target[3]) <= 0.10
+            and abs(q[4] - target[4]) <= 0.08
+            and abs(q[5] - target[5]) <= 0.03
+            and arm_error <= 0.20
         )
 
     def task_success(self) -> int:
         if self.task_name == "level1_verify":
-            return int(self.clear_view_ready())
+            return int(self.clear_view_ready() and self.level1_observation_pose_reached)
         if self.task_name == "level2_approach":
             return int(self.approach_success_ready())
         return int(self.placed)
@@ -531,15 +618,23 @@ class RoArmSimEnv:
                 if self.release_counter >= 3:
                     self.object_attached = False
                     self.lifted = False
+                    self.grasp_reference_ee_z = None
                     self.release_counter = 0
                     continue
                 self._update_attached_object_pose()
+                self._update_lifted_from_reference()
         mujoco.mj_forward(self.model, self.data)
 
     def _update_attached_object_pose(self) -> None:
         target_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "target")
         self.model.body_pos[target_body] = self._ee_position() + self.active_grasp_local_offset
         mujoco.mj_forward(self.model, self.data)
+
+    def _update_lifted_from_reference(self) -> None:
+        if not self.object_attached or self.grasp_reference_ee_z is None:
+            return
+        if float(self._ee_position()[2]) > float(self.grasp_reference_ee_z) + 0.015:
+            self.lifted = True
 
     def _execute_observe(self, primitive_id_value: int) -> None:
         self._apply_target_pose(observe_pose(primitive_id_value), dwell=2)
@@ -564,30 +659,20 @@ class RoArmSimEnv:
         q_target[5] = 0.0
         self._apply_target_pose(q_target, dwell=4)
         self._apply_target_pose(q_target, dwell=2)
-        if (
-            self._gripper_firmly_closed()
-            and (
-                self.grasp_gap() < 0.004
-                or (
-                    self.ee_target_distance() < 0.055
-                    and self.center_error_px() < 18.0
-                )
-            )
-        ):
+        if self._attach_capture_ready():
             self.active_grasp_local_offset = -self._grasp_site_local_positions()[self._nearest_grasp_site_name()]
             self.object_attached = True
             self.lifted = False
+            self.grasp_reference_ee_z = float(self._ee_position()[2])
             self.release_counter = 0
             self._update_attached_object_pose()
             self._apply_target_pose(self.data.qpos[:6].copy(), dwell=2)
 
     def _execute_lift(self) -> None:
-        before_z = float(self._ee_position()[2])
         q_target = LIFT_QPOS.copy()
         q_target[5] = self.data.qpos[5]
         self._apply_target_pose(q_target, dwell=2)
-        if self.object_attached and self._ee_position()[2] > before_z + 0.015:
-            self.lifted = True
+        self._update_lifted_from_reference()
 
     def _execute_transport(self) -> None:
         q_target = TRANSPORT_QPOS.copy()
@@ -602,6 +687,7 @@ class RoArmSimEnv:
             release_xy = self._ee_position()[:2]
             self.object_attached = False
             self.lifted = True
+            self.grasp_reference_ee_z = None
             target_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "target")
             self.model.body_pos[target_body] = np.asarray([release_xy[0], release_xy[1], 0.040], dtype=np.float64)
             mujoco.mj_forward(self.model, self.data)
@@ -651,7 +737,7 @@ class RoArmSimEnv:
         executor_primitive_id = primitive_id_value
         obs = self._observation()
         self._execute_primitive(executor_primitive_id)
-        self.verified = self.verify_ready()
+        self.verified = self.verified_status()
         self.step_idx += 1
         self.last_primitive = primitive_id_value
         next_obs = self._observation()

@@ -1,0 +1,35 @@
+base_config: continuous_diffusion_template.yaml
+
+control:
+  official:
+    config_overrides:
+      n_obs_steps: 1
+      horizon: 8
+      n_action_steps: 1
+      drop_n_last_frames: 7
+      pretrained_backbone_weights: ResNet18_Weights.IMAGENET1K_V1
+      use_group_norm: false
+      down_dims: [256, 512, 1024]
+      optimizer_lr: 5.0e-5
+      scheduler_warmup_steps: 250
+  action:
+    horizon: 1
+
+data_continuous:
+  history_len: 1
+  action_horizon: 1
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_v2_l3boost2
+    root: data/lerobot/roarm_continuous_train_v2_l3boost2
+  steps: 15000
+  save_freq: 2500
+  output_dir: outputs/train/lerobot/diffusion_v2_compact
+  job_name: roarm_diffusion_v2_compact
+
+early_stop:
+  max_steps: 15000
+  stage_steps: 2500
+  patience: 2
+  episodes_per_task: 12

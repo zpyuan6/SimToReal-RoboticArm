@@ -1,0 +1,26 @@
+base_config: continuous_diffusion_reactive1.yaml
+
+control:
+  official:
+    policy_path: outputs/train/lerobot/diffusion_v2_reactive1/checkpoints/005000/pretrained_model
+
+data_continuous:
+  train_path: data/continuous_l3only/train.npz
+  val_path: data/continuous_l3only/val.npz
+  test_path: data/continuous_l3only/test.npz
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_v2_l3only
+    root: data/lerobot/roarm_continuous_train_v2_l3only
+  steps: 15000
+  save_freq: 2500
+  output_dir: outputs/train/lerobot/diffusion_v2_l3only
+  job_name: roarm_diffusion_v2_l3only
+
+early_stop:
+  max_steps: 15000
+  stage_steps: 2500
+  patience: 2
+  episodes_per_task: 16
+  tasks: level3_pick_place

@@ -1,0 +1,17 @@
+base_config: continuous_act_jointtarget_staged_quicktrial.yaml
+
+data_continuous:
+  train_path: data/continuous_jointtarget_staged_l3only_quicktrial/train.npz
+  val_path: data/continuous_jointtarget_staged_l3only_quicktrial/val.npz
+  test_path: data/continuous_jointtarget_staged_l3only_quicktrial/test.npz
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_jointtarget_staged_l3only_quicktrial
+    root: data/lerobot/roarm_continuous_train_jointtarget_staged_l3only_quicktrial
+  output_dir: outputs/train/lerobot/act_jointtarget_staged_l3only_quicktrial
+  job_name: roarm_act_jointtarget_staged_l3only_quicktrial
+
+early_stop:
+  tasks: level3_pick_place
+  episodes_per_task: 12

@@ -1,0 +1,29 @@
+base_config: continuous_diffusion_template.yaml
+
+control:
+  official:
+    config_overrides:
+      n_obs_steps: 1
+      horizon: 8
+      n_action_steps: 1
+      drop_n_last_frames: 7
+      pretrained_backbone_weights: ResNet18_Weights.IMAGENET1K_V1
+      use_group_norm: false
+  action:
+    horizon: 1
+
+data_continuous:
+  history_len: 1
+  action_horizon: 1
+
+official_train:
+  steps: 30000
+  save_freq: 2500
+  output_dir: outputs/train/lerobot/diffusion_v2_reactive1
+  job_name: roarm_diffusion_v2_reactive1
+
+early_stop:
+  max_steps: 30000
+  stage_steps: 2500
+  patience: 2
+  episodes_per_task: 12

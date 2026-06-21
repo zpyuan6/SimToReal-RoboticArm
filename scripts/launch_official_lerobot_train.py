@@ -107,7 +107,11 @@ def build_lerobot_command(cfg: dict, overrides: dict[str, object] | None = None)
         for key, value in official_cfg.get("config_overrides", {}).items():
             if key == "device":
                 continue
-            cmd.append(f"--policy.{key}={value}")
+            if isinstance(value, bool):
+                rendered = str(value).lower()
+            else:
+                rendered = value
+            cmd.append(f"--policy.{key}={rendered}")
     return cmd
 
 

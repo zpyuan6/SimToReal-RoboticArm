@@ -1,0 +1,17 @@
+base_config: continuous_act_template.yaml
+
+control:
+  action:
+    control_mode: joint_target
+
+data_continuous:
+  train_path: data/continuous_jointtarget_trial/train.npz
+  val_path: data/continuous_jointtarget_trial/val.npz
+  test_path: data/continuous_jointtarget_trial/test.npz
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_jointtarget_trial
+    root: data/lerobot/roarm_continuous_train_jointtarget_trial
+  output_dir: outputs/train/lerobot/act_jointtarget_trial
+  job_name: roarm_act_jointtarget_trial

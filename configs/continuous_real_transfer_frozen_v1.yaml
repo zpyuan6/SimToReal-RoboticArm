@@ -1,0 +1,78 @@
+version: continuous_real_transfer_frozen_v1
+frozen_on: 2026-06-17
+scope: ACT/Diffusion continuous L1-L3 pseudo-real results and real-world transfer protocol.
+
+base_models:
+  act:
+    config: configs/continuous_act_jointtarget_staged_frozen_best.yaml
+    policy_path: outputs/train/lerobot/act_jointtarget_staged_quicktrial/checkpoints/020000/pretrained_model
+    action_representation: joint_target
+    proposed_method:
+      name: ours_action_representation_adapter
+      backbone_insertion: act_action_head_latent
+      post_adapter: task_bias
+      latent_adapter_scale: 0.05
+      latent_adapter_reg_weight: 0.5
+      latent_adapter_action_loss_weight: 0.25
+      latent_adapter_chunk_action_loss_weight: 0.0
+      latent_adapter_source_stat_weight: 0.0
+      latent_adapter_hyperparam_gate: none
+      action_loss_backend: policy_head
+      adapter_task_blends: [0.0, 0.0, 0.25]
+    pseudo_real_validation:
+      exact_replay_overall: 0.320
+      fresh_rollout_overall: 0.259
+    pseudo_real_test:
+      exact_replay_overall: 0.307
+      fresh_rollout_overall: 0.257
+
+  diffusion:
+    config: configs/continuous_diffusion_jointdelta_staged_frozen_best.yaml
+    policy_path: outputs/train/lerobot/diffusion_jointdelta_staged_nodrop_compact/checkpoints/012500/pretrained_model
+    action_representation: joint_delta
+    proposed_method:
+      name: ours_action_representation_adapter
+      backbone_insertion: diffusion_action_trajectory
+      post_adapter: none
+      trajectory_adapter_scale: 0.2
+      trajectory_adapter_first_action_weight: 2.0
+      trajectory_adapter_plan_loss_weight: 1.0
+      trajectory_adapter_smooth_loss_weight: 0.1
+      trajectory_adapter_reg_weight: 0.02
+      trajectory_adapter_epochs: 80
+      trajectory_adapter_max_pairs: 2048
+    pseudo_real_validation:
+      exact_replay_overall: 0.1333333333333333
+      fresh_rollout_overall: 0.12777777777777774
+      summary_csv: results/paper_diffusion_action_repr_trajectory_nopost_validation/combined/paper_success_summary.csv
+    pseudo_real_test:
+      exact_replay_overall: 0.15740740740740736
+      fresh_rollout_overall: 0.12592592592592589
+      summary_csv: results/paper_diffusion_action_repr_trajectory_nopost_test/combined/paper_success_summary.csv
+
+paper_protocol:
+  profiles: [appearance_shift, embodiment_shift, joint_shift]
+  seeds: [20260610, 20260611, 20260612]
+  calibration_episodes_per_profile_seed: 30
+  validation_episodes_per_profile_seed: 60
+  test_episodes_per_profile_seed: 60
+  exact_num_per_task: 20
+  fresh_episodes_per_task: 20
+  split_source_root: results/paper_continuous_sim2real_protocol
+  rule: Use validation for method selection only; report final claims from test split.
+
+real_transfer:
+  collection_plan: configs/continuous_real_collection_plan_v1.yaml
+  collector: scripts/collect_continuous_real_calibration.py
+  merger: scripts/merge_continuous_real_sessions.py
+  protocol_doc: docs/continuous_real_collection_protocol_v1.md
+  calibration_outputs:
+    act_joint_target: data/real_continuous_v1/merged/calibration_joint_target.npz
+    diffusion_joint_delta: data/real_continuous_v1/merged/calibration_joint_delta.npz
+  heldout_outputs:
+    act_joint_target: data/real_continuous_v1/merged/heldout_joint_target.npz
+    diffusion_joint_delta: data/real_continuous_v1/merged/heldout_joint_delta.npz
+
+notes:
+  - This file is the frozen handoff point from pseudo-real experiments to real calibration and real rollout.
+  - Do not change these hyperparameters when collecting real data; create a v2 manifest if the method changes.

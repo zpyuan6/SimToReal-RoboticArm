@@ -79,6 +79,8 @@ HOME_QPOS = np.asarray([0.0, 0.0, 1.5708, 0.0, 0.0, 0.1964], dtype=np.float32)
 OBS_CENTER_QPOS = np.asarray([0.0, 0.1, 2.6, -0.4189, 0.0, 0.4363], dtype=np.float32)
 OBS_LEFT_QPOS = np.asarray([0.3142, 0.1, 2.6, -0.4189, 0.0, 0.4363], dtype=np.float32)
 OBS_RIGHT_QPOS = np.asarray([-0.2443, 0.1, 2.6, -0.4189, 0.0, 0.4363], dtype=np.float32)
+# Fixed continuous L1 observation pose used before left/right scan and image-space centering.
+L1_FIXED_OBSERVE_QPOS = np.asarray([0.0, 0.0980, 2.2634, 0.3561, 0.0, 0.4356], dtype=np.float32)
 # The remaining manipulation primitives are fixed scripted joint targets,
 # derived from the last visually validated MuJoCo task flow. This keeps sim and
 # real execution on the same side of the abstraction boundary: the policy picks

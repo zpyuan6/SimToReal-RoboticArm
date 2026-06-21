@@ -1,0 +1,20 @@
+base_config: continuous_act_refine.yaml
+
+control:
+  official:
+    policy_path: outputs/train/lerobot/act_v2_refine/checkpoints/005000/pretrained_model
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_v2_l3boost
+    root: data/lerobot/roarm_continuous_train_v2_l3boost
+  steps: 15000
+  save_freq: 2500
+  output_dir: outputs/train/lerobot/act_v2_l3boost
+  job_name: roarm_act_v2_l3boost
+
+early_stop:
+  max_steps: 15000
+  stage_steps: 2500
+  patience: 2
+  episodes_per_task: 12

@@ -2,6 +2,7 @@ from .act import ACTBackbone
 from .diffusion import DiffusionPolicyBackbone
 from .lerobot_base import LeRobotOfficialBackbone, LeRobotPolicySpec
 from .smolvla import SmolVLABackbone
+from .task_policy_selector import TaskPolicySelectorBackbone
 
 __all__ = [
     "ACTBackbone",
@@ -9,4 +10,5 @@ __all__ = [
     "LeRobotOfficialBackbone",
     "LeRobotPolicySpec",
     "SmolVLABackbone",
+    "TaskPolicySelectorBackbone",
 ]

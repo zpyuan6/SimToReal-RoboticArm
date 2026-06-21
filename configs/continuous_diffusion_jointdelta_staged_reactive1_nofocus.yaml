@@ -1,0 +1,28 @@
+base_config: continuous_diffusion_jointdelta_staged_nodrop_compact.yaml
+
+control:
+  official:
+    config_overrides:
+      n_obs_steps: 2
+      horizon: 8
+      n_action_steps: 1
+      drop_n_last_frames: 0
+      pretrained_backbone_weights: ResNet18_Weights.IMAGENET1K_V1
+      use_group_norm: false
+      down_dims: [256, 512, 1024]
+      optimizer_lr: 5.0e-5
+      scheduler_warmup_steps: 250
+
+data_continuous:
+  history_len: 2
+  action_horizon: 1
+
+official_train:
+  output_dir: outputs/train/lerobot/diffusion_jointdelta_staged_reactive1_nofocus
+  job_name: roarm_diffusion_jointdelta_staged_reactive1_nofocus
+
+early_stop:
+  max_steps: 20000
+  stage_steps: 2500
+  patience: 2
+  validation_max_batches: 64

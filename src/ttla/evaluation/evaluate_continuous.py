@@ -70,10 +70,12 @@ def _build_observation_batch(
     images = torch.from_numpy(image_stack).permute(0, 3, 1, 2).unsqueeze(0).float() / 255.0
     proprio = torch.from_numpy(proprio_stack).unsqueeze(0).float()
     texts = [str(task_text or "")]
+    task_id = int(np.argmax(proprio_stack[-1, 12:15])) if proprio_stack.shape[-1] >= 15 else None
     return ControlObservationBatch(
         images=images,
         proprio=proprio,
         task_text=texts if uses_language else None,
+        task_id=task_id,
     )
 
 
@@ -124,6 +126,7 @@ def _summarize_records(df: pd.DataFrame) -> pd.DataFrame:
         "grasped",
         "lifted",
         "placed",
+        "final_ee_ear_center_distance",
         "final_ee_target_distance",
         "final_grasp_gap",
         "final_dropzone_distance",
@@ -172,12 +175,13 @@ def evaluate_continuous_backbone(
                 "visibility": 0.0,
                 "center_error": 0.0,
                 "verified": 0,
-                "grasped": 0,
-                "lifted": 0,
-                "placed": 0,
-                "ee_target_distance": float("nan"),
-                "grasp_gap": float("nan"),
-                "dropzone_distance": float("nan"),
+            "grasped": 0,
+            "lifted": 0,
+            "placed": 0,
+            "ee_ear_center_distance": float("nan"),
+            "ee_target_distance": float("nan"),
+            "grasp_gap": float("nan"),
+            "dropzone_distance": float("nan"),
             }
             success = 0
             for step in range(int(cfg["sim"]["episode_horizon"])):
@@ -210,6 +214,7 @@ def evaluate_continuous_backbone(
                     "grasped": int(info.get("grasped", 0)),
                     "lifted": int(info.get("lifted", 0)),
                     "placed": int(info.get("placed", 0)),
+                    "final_ee_ear_center_distance": float(info.get("ee_ear_center_distance", float("nan"))),
                     "final_ee_target_distance": float(info.get("ee_target_distance", float("nan"))),
                     "final_grasp_gap": float(info.get("grasp_gap", float("nan"))),
                     "final_dropzone_distance": float(info.get("dropzone_distance", float("nan"))),

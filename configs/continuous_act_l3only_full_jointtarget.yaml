@@ -1,0 +1,28 @@
+base_config: continuous_act_l3boost_mild.yaml
+
+control:
+  action:
+    control_mode: joint_target
+  official:
+    policy_path: outputs/train/lerobot/act_v2_l3boost_mild/checkpoints/005000/pretrained_model
+
+data_continuous:
+  train_path: data/continuous_l3only_jointtarget/train.npz
+  val_path: data/continuous_l3only_jointtarget/val.npz
+  test_path: data/continuous_l3only_jointtarget/test.npz
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_v2_l3only_jointtarget
+    root: data/lerobot/roarm_continuous_train_v2_l3only_jointtarget
+  steps: 15000
+  save_freq: 2500
+  output_dir: outputs/train/lerobot/act_v2_l3only_jointtarget
+  job_name: roarm_act_v2_l3only_jointtarget
+
+early_stop:
+  max_steps: 15000
+  stage_steps: 2500
+  patience: 2
+  episodes_per_task: 16
+  tasks: level3_pick_place

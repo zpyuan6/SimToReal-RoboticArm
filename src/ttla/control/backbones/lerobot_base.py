@@ -44,6 +44,15 @@ class LeRobotOfficialBackbone(BaseControlBackbone):
         self.backbone_name = str(policy_spec.policy_type)
         self.backbone_family = str(policy_spec.family)
         self._policy_impl: Any | None = None
+        self._policy_preprocessor: Any | None = None
+        self._policy_postprocessor: Any | None = None
+        self._latent_hook_handle: Any | None = None
+        self._last_policy_latent: torch.Tensor | None = None
+        self._last_policy_adapted_latent: torch.Tensor | None = None
+        self._latent_adapter: Any | None = None
+        self._trajectory_adapter: Any | None = None
+        self._diffusion_denoise_adapter: Any | None = None
+        self._latent_adapter_context: dict[str, Any] = {}
         self._availability_error: str | None = None
         self._lazy_pretrained_load = bool(policy_spec.policy_path)
         self._requested_device = self.official_cfg.get("policy_device") or self.official_cfg.get("device") or "cpu"
@@ -140,6 +149,21 @@ class LeRobotOfficialBackbone(BaseControlBackbone):
         if hasattr(self._policy_impl, "to"):
             self._policy_impl.to(device)
 
+    def _apply_runtime_config_overrides(self) -> None:
+        if self._policy_impl is None:
+            return
+        overrides = self.official_cfg.get("config_overrides", {})
+        config = getattr(self._policy_impl, "config", None)
+        if config is not None and hasattr(config, "device"):
+            config.device = str(self._requested_torch_device())
+        for key, value in overrides.items():
+            if config is not None and hasattr(config, key):
+                setattr(config, key, value)
+        if self.policy_spec.policy_type == "diffusion" and "num_inference_steps" in overrides:
+            diffusion = getattr(self._policy_impl, "diffusion", None)
+            if diffusion is not None:
+                diffusion.num_inference_steps = int(overrides["num_inference_steps"])
+
     def _try_resolve_policy(self) -> None:
         try:
             importlib.import_module("lerobot")
@@ -163,6 +187,7 @@ class LeRobotOfficialBackbone(BaseControlBackbone):
             config = self._build_policy_config()
             self._policy_impl = policy_cls(config)
             self._move_policy_to_requested_device()
+            self._install_latent_capture()
             self._availability_error = None
         except Exception as exc:  # pragma: no cover - installation/runtime dependent
             extras = ""
@@ -187,7 +212,10 @@ class LeRobotOfficialBackbone(BaseControlBackbone):
                 self.policy_spec.policy_path,
                 cache_dir=os.environ.get("HF_HOME"),
             )
+            self._try_load_policy_processors()
+            self._apply_runtime_config_overrides()
             self._move_policy_to_requested_device()
+            self._install_latent_capture()
             self._availability_error = None
             self._lazy_pretrained_load = False
         except Exception as exc:  # pragma: no cover - installation/runtime dependent
@@ -200,6 +228,230 @@ class LeRobotOfficialBackbone(BaseControlBackbone):
             )
             self._policy_impl = None
             raise RuntimeError(self._availability_error) from exc
+
+    def _try_load_policy_processors(self) -> None:
+        self._policy_preprocessor = None
+        self._policy_postprocessor = None
+        if not self.policy_spec.policy_path:
+            return
+        try:
+            from lerobot.processor import PolicyProcessorPipeline
+
+            self._policy_preprocessor = PolicyProcessorPipeline.from_pretrained(
+                self.policy_spec.policy_path,
+                config_filename="policy_preprocessor.json",
+            )
+            self._policy_postprocessor = PolicyProcessorPipeline.from_pretrained(
+                self.policy_spec.policy_path,
+                config_filename="policy_postprocessor.json",
+            )
+        except Exception:
+            self._policy_preprocessor = None
+            self._policy_postprocessor = None
+
+    def _find_policy_module(self, module_name: str) -> Any | None:
+        if self._policy_impl is None:
+            return None
+        modules = dict(self._policy_impl.named_modules())
+        return modules.get(module_name)
+
+    def _install_latent_capture(self) -> None:
+        self._last_policy_latent = None
+        self._last_policy_adapted_latent = None
+        if self._policy_impl is None:
+            return
+        if self.policy_spec.policy_type == "act":
+            action_head = self._find_policy_module("model.action_head")
+            if action_head is None:
+                return
+            if self._latent_hook_handle is not None:
+                self._latent_hook_handle.remove()
+
+            def _capture_or_adapt_action_head_input(_module, inputs):
+                if not inputs:
+                    return None
+                latent = inputs[0]
+                self._last_policy_latent = latent.detach()
+                adapted = self._apply_runtime_latent_adapter(latent)
+                if adapted is latent:
+                    return None
+                self._last_policy_adapted_latent = adapted.detach()
+                return (adapted, *inputs[1:])
+
+            self._latent_hook_handle = action_head.register_forward_pre_hook(_capture_or_adapt_action_head_input)
+            return
+        if self.policy_spec.policy_type == "diffusion":
+            diffusion = getattr(self._policy_impl, "diffusion", None)
+            if diffusion is None or not hasattr(diffusion, "_prepare_global_conditioning"):
+                return
+            if hasattr(diffusion, "_ttla_original_prepare_global_conditioning"):
+                return
+            original_prepare = diffusion._prepare_global_conditioning
+
+            def _capture_global_conditioning(batch, _original_prepare=original_prepare):
+                global_cond = _original_prepare(batch)
+                self._last_policy_latent = global_cond.detach()
+                adapted = self._apply_runtime_latent_adapter(global_cond)
+                if adapted is not global_cond:
+                    self._last_policy_adapted_latent = adapted.detach()
+                return adapted
+
+            diffusion._ttla_original_prepare_global_conditioning = original_prepare
+            diffusion._prepare_global_conditioning = _capture_global_conditioning
+            if hasattr(diffusion, "_ttla_original_conditional_sample"):
+                return
+            original_conditional_sample = diffusion.conditional_sample
+
+            def _conditional_sample_with_adapter(
+                batch_size: int,
+                global_cond=None,
+                generator=None,
+                noise=None,
+                _original_conditional_sample=original_conditional_sample,
+                _diffusion=diffusion,
+            ):
+                if self._diffusion_denoise_adapter is None:
+                    return _original_conditional_sample(
+                        batch_size,
+                        global_cond=global_cond,
+                        generator=generator,
+                        noise=noise,
+                    )
+                try:
+                    param = next(_diffusion.parameters())
+                    device = param.device
+                    dtype = param.dtype
+                except StopIteration:
+                    device = torch.device("cpu")
+                    dtype = torch.float32
+                sample = (
+                    noise
+                    if noise is not None
+                    else torch.randn(
+                        size=(
+                            int(batch_size),
+                            int(_diffusion.config.horizon),
+                            int(_diffusion.config.action_feature.shape[0]),
+                        ),
+                        dtype=dtype,
+                        device=device,
+                        generator=generator,
+                    )
+                )
+                _diffusion.noise_scheduler.set_timesteps(_diffusion.num_inference_steps)
+                for t in _diffusion.noise_scheduler.timesteps:
+                    timestep = torch.full(sample.shape[:1], t, dtype=torch.long, device=sample.device)
+                    model_output = _diffusion.unet(sample, timestep, global_cond=global_cond)
+                    model_output = self._apply_runtime_diffusion_denoise_adapter(model_output, sample, timestep)
+                    sample = _diffusion.noise_scheduler.step(model_output, t, sample, generator=generator).prev_sample
+                return sample
+
+            diffusion._ttla_original_conditional_sample = original_conditional_sample
+            diffusion.conditional_sample = _conditional_sample_with_adapter
+
+    def _captured_latent_or_plan(self, planned_actions: torch.Tensor, input_device: torch.device) -> torch.Tensor:
+        latent = self._last_policy_latent
+        if latent is None:
+            return planned_actions.flatten(start_dim=1).to(input_device)
+        if latent.ndim == 0:
+            return planned_actions.flatten(start_dim=1).to(input_device)
+        if latent.shape[0] != planned_actions.shape[0]:
+            return planned_actions.flatten(start_dim=1).to(input_device)
+        return latent.reshape(latent.shape[0], -1).to(input_device)
+
+    def set_latent_adapter(self, adapter: Any | None) -> None:
+        self._latent_adapter = adapter
+        if adapter is not None and hasattr(adapter, "eval"):
+            adapter.eval()
+
+    def supports_runtime_latent_adapter(self) -> bool:
+        return self.policy_spec.policy_type in {"act", "diffusion"}
+
+    def set_trajectory_adapter(self, adapter: Any | None) -> None:
+        self._trajectory_adapter = adapter
+        if adapter is not None and hasattr(adapter, "eval"):
+            adapter.eval()
+
+    def supports_runtime_trajectory_adapter(self) -> bool:
+        return self.policy_spec.policy_type in {"act", "diffusion"}
+
+    def set_diffusion_denoise_adapter(self, adapter: Any | None) -> None:
+        self._diffusion_denoise_adapter = adapter
+        if adapter is not None and hasattr(adapter, "eval"):
+            adapter.eval()
+
+    def supports_runtime_diffusion_denoise_adapter(self) -> bool:
+        return self.policy_spec.policy_type == "diffusion"
+
+    def _current_task_id_tensor(self, batch: ControlObservationBatch, proprio: torch.Tensor) -> torch.Tensor | int | None:
+        if batch.task_id is not None:
+            return batch.task_id
+        if proprio.shape[-1] >= 15:
+            return torch.argmax(proprio[..., 12:15], dim=-1)
+        return None
+
+    def _set_latent_adapter_context(self, batch: ControlObservationBatch) -> None:
+        proprio = self._current_proprio(batch).detach()
+        self._latent_adapter_context = {
+            "task_id": self._current_task_id_tensor(batch, proprio),
+            "proprio": proprio,
+        }
+
+    def _apply_runtime_latent_adapter(self, latent: torch.Tensor) -> torch.Tensor:
+        adapter = self._latent_adapter
+        if adapter is None:
+            return latent
+        if hasattr(adapter, "to"):
+            adapter.to(latent.device)
+        context = self._latent_adapter_context
+        task_id = context.get("task_id")
+        proprio = context.get("proprio")
+        if torch.is_tensor(task_id):
+            task_id = task_id.to(device=latent.device)
+        if torch.is_tensor(proprio):
+            proprio = proprio.to(device=latent.device, dtype=latent.dtype)
+        if hasattr(adapter, "adapt_tensor"):
+            return adapter.adapt_tensor(latent, task_id=task_id, proprio=proprio)
+        return adapter(latent)
+
+    def _apply_runtime_trajectory_adapter(self, planned_actions: torch.Tensor) -> torch.Tensor:
+        adapter = self._trajectory_adapter
+        if adapter is None:
+            return planned_actions
+        if hasattr(adapter, "to"):
+            adapter.to(planned_actions.device)
+        context = self._latent_adapter_context
+        task_id = context.get("task_id")
+        proprio = context.get("proprio")
+        if torch.is_tensor(task_id):
+            task_id = task_id.to(device=planned_actions.device)
+        if torch.is_tensor(proprio):
+            proprio = proprio.to(device=planned_actions.device, dtype=planned_actions.dtype)
+        if hasattr(adapter, "adapt_tensor"):
+            return adapter.adapt_tensor(planned_actions, task_id=task_id, proprio=proprio)
+        return adapter(planned_actions)
+
+    def _apply_runtime_diffusion_denoise_adapter(
+        self,
+        model_output: torch.Tensor,
+        sample: torch.Tensor,
+        timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        adapter = self._diffusion_denoise_adapter
+        if adapter is None:
+            return model_output
+        if hasattr(adapter, "to"):
+            adapter.to(model_output.device)
+        context = self._latent_adapter_context
+        task_id = context.get("task_id")
+        proprio = context.get("proprio")
+        if torch.is_tensor(task_id):
+            task_id = task_id.to(device=model_output.device)
+        if torch.is_tensor(proprio):
+            proprio = proprio.to(device=model_output.device, dtype=model_output.dtype)
+        if hasattr(adapter, "adapt_denoise"):
+            return adapter.adapt_denoise(model_output, sample, timestep, task_id=task_id, proprio=proprio)
+        return adapter(model_output)
 
     def availability_error(self) -> str | None:
         return self._availability_error
@@ -277,8 +529,34 @@ class LeRobotOfficialBackbone(BaseControlBackbone):
             task_text = batch.task_text or [""] * batch_size
             if len(task_text) == 1 and batch_size > 1:
                 task_text = task_text * batch_size
-            official_batch.update(self._build_language_tokens([str(v) for v in task_text], device))
+            task_text = [str(v) for v in task_text]
+            if self.policy_spec.policy_type == "smolvla":
+                official_batch["task"] = task_text
+            else:
+                official_batch.update(self._build_language_tokens(task_text, device))
         return official_batch
+
+    def _preprocess_official_batch(self, official_batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        if self._policy_preprocessor is None:
+            return official_batch
+        return self._policy_preprocessor(official_batch)
+
+    def _move_official_batch_to_policy_device(self, value: Any) -> Any:
+        device = self._policy_device()
+        if torch.is_tensor(value):
+            return value.to(device)
+        if isinstance(value, dict):
+            return {key: self._move_official_batch_to_policy_device(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._move_official_batch_to_policy_device(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._move_official_batch_to_policy_device(item) for item in value)
+        return value
+
+    def _postprocess_action(self, action: torch.Tensor) -> torch.Tensor:
+        if self._policy_postprocessor is None:
+            return action
+        return self._policy_postprocessor.process_action(action)
 
     @staticmethod
     def _ensure_batched_action(action: torch.Tensor) -> torch.Tensor:
@@ -299,8 +577,10 @@ class LeRobotOfficialBackbone(BaseControlBackbone):
         return []
 
     def _compose_plan(self, selected_action: torch.Tensor) -> torch.Tensor:
-        selected_action = self._ensure_batched_action(selected_action)
-        queue_actions = [self._ensure_batched_action(t) for t in self._pending_action_queue()]
+        selected_action = self._ensure_batched_action(self._postprocess_action(selected_action))
+        queue_actions = [
+            self._ensure_batched_action(self._postprocess_action(t)) for t in self._pending_action_queue()
+        ]
         plan_steps = [selected_action] + queue_actions
         plan = torch.stack(plan_steps, dim=1)
         return plan
@@ -313,13 +593,17 @@ class LeRobotOfficialBackbone(BaseControlBackbone):
                 or f"Official loader for {self.policy_spec.policy_type} is not available."
             )
         input_device = batch.images.device
+        self._set_latent_adapter_context(batch)
         official_batch = self._build_official_batch(batch)
+        official_batch = self._preprocess_official_batch(official_batch)
+        official_batch = self._move_official_batch_to_policy_device(official_batch)
         with torch.no_grad():
             selected_action = self._policy_impl.select_action(official_batch)
             planned_actions = self._compose_plan(selected_action)
-        selected_action = self._ensure_batched_action(selected_action).to(input_device)
+            planned_actions = self._apply_runtime_trajectory_adapter(planned_actions)
+        selected_action = planned_actions[:, 0].to(input_device)
         planned_actions = planned_actions.to(input_device)
-        latent = planned_actions.flatten(start_dim=1)
+        latent = self._captured_latent_or_plan(planned_actions, input_device)
         return ControlPolicyOutput(
             actions=selected_action.unsqueeze(1),
             latent=latent,
@@ -330,5 +614,7 @@ class LeRobotOfficialBackbone(BaseControlBackbone):
         return self.policy_spec.latent_name
 
     def reset_policy_state(self) -> None:
+        self._last_policy_latent = None
+        self._last_policy_adapted_latent = None
         if self._policy_impl is not None and hasattr(self._policy_impl, "reset"):
             self._policy_impl.reset()

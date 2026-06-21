@@ -1,0 +1,14 @@
+base_config: continuous_act_jointtarget_staged_dr_trainlike.yaml
+
+control:
+  official:
+    policy_path: outputs/train/lerobot/act_jointtarget_staged_quicktrial/checkpoints/020000/pretrained_model
+
+official_train:
+  output_dir: outputs/train/lerobot/act_jointtarget_staged_dr_finetune
+  job_name: roarm_act_jointtarget_staged_dr_finetune
+
+early_stop:
+  max_steps: 10000
+  stage_steps: 2500
+  patience: 2

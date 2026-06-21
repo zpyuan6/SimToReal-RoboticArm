@@ -1,0 +1,16 @@
+base_config: continuous_act_jointtarget_staged_frozen_best.yaml
+
+control:
+  backbone_name: task_policy_selector
+  official:
+    selector_backbone_name: act
+    policy_path: outputs/train/lerobot/act_jointtarget_staged_quicktrial/checkpoints/020000/pretrained_model
+    task_policy_paths:
+      0: outputs/train/lerobot/act_jointtarget_staged_visualdr_mix_head_sweep/checkpoints/000500/pretrained_model
+      1: outputs/train/lerobot/act_jointtarget_staged_quicktrial/checkpoints/020000/pretrained_model
+      2: outputs/train/lerobot/act_jointtarget_staged_quicktrial/checkpoints/020000/pretrained_model
+
+frozen_baseline:
+  name: act_jointtarget_staged_task_policy_selector_2026_05_29
+  scope: experimental task-policy selector; L1 uses visual/camera DR head-500, L2/L3 use frozen ACT
+  policy_path: outputs/train/lerobot/act_jointtarget_staged_quicktrial/checkpoints/020000/pretrained_model

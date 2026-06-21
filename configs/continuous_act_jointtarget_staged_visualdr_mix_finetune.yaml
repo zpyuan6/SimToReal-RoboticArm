@@ -1,0 +1,13 @@
+base_config: continuous_act_jointtarget_staged_visualdr_finetune.yaml
+
+data_continuous:
+  train_path: data/continuous_jointtarget_staged_visualdr_mix/train.npz
+  val_path: data/continuous_jointtarget_staged_visualdr_mix/val.npz
+  test_path: data/continuous_jointtarget_staged_visualdr_mix/test.npz
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_jointtarget_staged_visualdr_mix
+    root: data/lerobot/roarm_continuous_train_jointtarget_staged_visualdr_mix
+  output_dir: outputs/train/lerobot/act_jointtarget_staged_visualdr_mix_finetune
+  job_name: roarm_act_jointtarget_staged_visualdr_mix_finetune

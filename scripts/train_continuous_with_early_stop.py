@@ -44,13 +44,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--torch-home", help="Override TORCH_HOME.")
     parser.add_argument("--uv-cache-dir", help="Override UV_CACHE_DIR.")
     parser.add_argument("--offline", action="store_true", help="Force offline Hugging Face / Transformers mode.")
+    parser.add_argument("--skip-final-rollout", action="store_true", help="Skip final rollout checkpoint selection.")
     parser.add_argument("--run", action="store_true", help="Actually run the staged training loop.")
     return parser.parse_args()
 
 
-def _task_list(raw: str | None) -> list[str] | None:
+def _task_list(raw: str | list[str] | tuple[str, ...] | None) -> list[str] | None:
     if not raw:
         return None
+    if isinstance(raw, (list, tuple)):
+        tasks = [str(part).strip() for part in raw if str(part).strip()]
+        return tasks or None
     tasks = [part.strip() for part in raw.split(",") if part.strip()]
     return tasks or None
 
@@ -261,8 +265,21 @@ def main() -> None:
     best_stage_step = current_step if current_step > 0 else 0
     no_improve_count = 0
     rows: list[dict[str, object]] = []
+    history_path = selection_root / "stage_history.csv"
+    if history_path.exists():
+        history = pd.read_csv(history_path)
+        if not history.empty:
+            rows = history.to_dict("records")
+            ranked = history.sort_values(["val_action_mse", "stage_step"], ascending=[True, True])
+            best_row = ranked.iloc[0]
+            best_primary_metric = float(best_row["val_action_mse"])
+            best_checkpoint = Path(str(best_row["policy_path"]))
+            best_stage_step = int(best_row["stage_step"])
+            chronological = history.sort_values("stage_step")
+            no_improve_count = int(chronological.iloc[-1].get("no_improve_count", 0))
 
-    if current_step > 0:
+    known_steps = {int(row["stage_step"]) for row in rows if "stage_step" in row}
+    if current_step > 0 and current_step not in known_steps:
         existing_policy = _latest_numbered_checkpoint(train_output_dir)
         eval_root = selection_root / f"{current_step:06d}"
         summary_path = evaluate_continuous_validation_loss(
@@ -384,7 +401,7 @@ def main() -> None:
         best_txt.write_text(str(resolve_official_policy_path(best_checkpoint)), encoding="utf-8")
         print(f"best_checkpoint={best_checkpoint}")
         print(f"best_checkpoint_txt={best_txt}")
-    if args.run:
+    if args.run and not args.skip_final_rollout:
         rollout_root = train_output_dir / "final_rollout_selection"
         ranking_path, best_txt = _run_final_rollout_selection(
             cfg,

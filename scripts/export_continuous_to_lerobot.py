@@ -23,8 +23,19 @@ STATE_NAMES = (
     "qvel_3",
     "qvel_4",
     "qvel_5",
-    "task_id",
+    "task_level1_verify",
+    "task_level2_approach",
+    "task_level3_pick_place",
     "progress",
+)
+
+GEOMETRY_STATE_NAMES = (
+    "target_x",
+    "target_y",
+    "target_z",
+    "drop_x",
+    "drop_y",
+    "drop_z",
 )
 
 ACTION_NAMES = (
@@ -46,6 +57,20 @@ SMOLVLA_IMAGE_KEYS = (
 )
 
 
+def _parse_repeat_specs(values: list[str]) -> dict[str, int]:
+    mapping: dict[str, int] = {}
+    for value in values:
+        if "=" not in value:
+            raise ValueError(f"Invalid repeat spec '{value}'. Expected task_name=repeat_count.")
+        task_name, repeat_text = value.split("=", 1)
+        task_name = task_name.strip()
+        repeat_count = int(repeat_text)
+        if repeat_count < 1:
+            raise ValueError(f"Repeat count for '{task_name}' must be >= 1, got {repeat_count}.")
+        mapping[task_name] = repeat_count
+    return mapping
+
+
 def _resize_image(image: np.ndarray, shape_hw: tuple[int, int]) -> np.ndarray:
     height, width = (int(shape_hw[0]), int(shape_hw[1]))
     pil_image = Image.fromarray(image.astype(np.uint8))
@@ -63,10 +88,9 @@ def _schema_from_config(cfg: dict, schema: str) -> str:
 
 
 def _dataset_features_default(image_shape: tuple[int, int, int], proprio_dim: int, action_dim: int) -> dict:
-    if proprio_dim != len(STATE_NAMES):
-        raise ValueError(f"Expected {len(STATE_NAMES)}-D proprio, got {proprio_dim}")
     if action_dim != len(ACTION_NAMES):
         raise ValueError(f"Expected {len(ACTION_NAMES)}-D action, got {action_dim}")
+    state_names = _state_names(int(proprio_dim))
     features = dict(DEFAULT_FEATURES)
     features[IMAGE_KEY] = {
         "dtype": "image",
@@ -76,7 +100,7 @@ def _dataset_features_default(image_shape: tuple[int, int, int], proprio_dim: in
     features[STATE_KEY] = {
         "dtype": "float32",
         "shape": (int(proprio_dim),),
-        "names": list(STATE_NAMES),
+        "names": state_names,
     }
     features[ACTION_KEY] = {
         "dtype": "float32",
@@ -84,6 +108,19 @@ def _dataset_features_default(image_shape: tuple[int, int, int], proprio_dim: in
         "names": list(ACTION_NAMES),
     }
     return features
+
+
+def _state_names(proprio_dim: int) -> list[str]:
+    base_names = list(STATE_NAMES)
+    if proprio_dim == len(base_names):
+        return base_names
+    geometry_names = base_names + list(GEOMETRY_STATE_NAMES)
+    if proprio_dim == len(geometry_names):
+        return geometry_names
+    if proprio_dim > len(base_names):
+        extra = [f"extra_state_{idx}" for idx in range(proprio_dim - len(base_names))]
+        return base_names + extra
+    return [f"state_{idx}" for idx in range(proprio_dim)]
 
 
 def _dataset_features_smolvla(image_shape: tuple[int, int, int], proprio_dim: int, action_dim: int) -> dict:
@@ -167,6 +204,7 @@ def export_npz_to_lerobot(
     repo_id: str,
     fps: int,
     schema: str = "default",
+    repeat_task: dict[str, int] | None = None,
 ) -> Path:
     bundle = np.load(npz_path, allow_pickle=True)
     images = bundle["images"]
@@ -174,7 +212,9 @@ def export_npz_to_lerobot(
     actions = bundle["actions"]
     episode_ids = bundle["episode_ids"]
     step_ids = bundle["step_ids"]
+    tasks = bundle["tasks"]
     task_text = bundle["task_text"]
+    repeat_task = repeat_task or {}
 
     dataset_root = Path(output_root)
     dataset_root.parent.mkdir(parents=True, exist_ok=True)
@@ -203,17 +243,20 @@ def export_npz_to_lerobot(
         if indices.size == 0:
             continue
         indices = indices[np.argsort(step_ids[indices])]
-        for idx in indices.tolist():
-            dataset.add_frame(
-                _frame_for_schema(
-                    schema=schema,
-                    image=images[idx],
-                    proprio=proprio[idx],
-                    action=actions[idx],
-                    task=str(task_text[idx]),
+        task_name = str(tasks[indices[0]])
+        repeat_count = int(repeat_task.get(task_name, 1))
+        for _ in range(repeat_count):
+            for idx in indices.tolist():
+                dataset.add_frame(
+                    _frame_for_schema(
+                        schema=schema,
+                        image=images[idx],
+                        proprio=proprio[idx],
+                        action=actions[idx],
+                        task=str(task_text[idx]),
+                    )
                 )
-            )
-        dataset.save_episode(parallel_encoding=False)
+            dataset.save_episode(parallel_encoding=False)
     return dataset_root
 
 
@@ -229,6 +272,12 @@ def main() -> None:
         default="auto",
         help="Official dataset schema view to export",
     )
+    parser.add_argument(
+        "--repeat-task",
+        action="append",
+        default=[],
+        help="Repeat spec in the form task_name=repeat_count. Repeat count includes the original copy.",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -241,6 +290,7 @@ def main() -> None:
         repo_id=args.repo_id,
         fps=fps,
         schema=schema,
+        repeat_task=_parse_repeat_specs(args.repeat_task),
     )
     print(output_root)
 

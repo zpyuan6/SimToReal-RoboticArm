@@ -225,6 +225,15 @@ def _extract_task_ids(state: torch.Tensor, task_vocab_size: int) -> torch.Tensor
         state = state.unsqueeze(0)
     if state.shape[-1] < 2:
         return torch.zeros(state.shape[0], dtype=torch.long, device=state.device)
+    one_hot_width = int(max(task_vocab_size, 0))
+    if state.shape[-1] >= one_hot_width + 1 and one_hot_width >= 2:
+        task_block = state[..., -(one_hot_width + 1):-1]
+        if task_block.numel() > 0:
+            task_min = float(task_block.min().item())
+            task_max = float(task_block.max().item())
+            task_sum = task_block.sum(dim=-1)
+            if task_min >= -0.1 and task_max <= 1.1 and bool(torch.all((task_sum >= 0.5) & (task_sum <= 1.5)).item()):
+                return task_block.argmax(dim=-1).long().clamp(0, max(task_vocab_size - 1, 0))
     task_id = torch.round(state[..., -2]).long()
     return task_id.clamp(0, max(task_vocab_size - 1, 0))
 
@@ -246,6 +255,8 @@ def _resolve_task_ids(
 def _strip_task_feature(state: torch.Tensor) -> torch.Tensor:
     if state.shape[-1] < 2:
         return state
+    if state.shape[-1] >= 16:
+        return torch.cat([state[..., :-4], state[..., -1:]], dim=-1)
     return torch.cat([state[..., :-2], state[..., -1:]], dim=-1)
 
 

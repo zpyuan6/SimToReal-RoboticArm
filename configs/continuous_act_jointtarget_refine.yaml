@@ -1,0 +1,25 @@
+base_config: continuous_act_jointtarget_trial.yaml
+
+control:
+  official:
+    config_overrides:
+      chunk_size: 12
+      n_action_steps: 2
+  action:
+    horizon: 2
+
+data_continuous:
+  history_len: 2
+  action_horizon: 2
+
+official_train:
+  steps: 30000
+  save_freq: 2500
+  output_dir: outputs/train/lerobot/act_jointtarget_refine
+  job_name: roarm_act_jointtarget_refine
+
+early_stop:
+  max_steps: 30000
+  stage_steps: 2500
+  patience: 2
+  episodes_per_task: 12

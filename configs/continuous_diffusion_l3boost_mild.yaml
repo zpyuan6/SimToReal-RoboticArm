@@ -1,0 +1,23 @@
+base_config: continuous_diffusion_reactive1.yaml
+
+control:
+  official:
+    policy_path: outputs/train/lerobot/diffusion_v2_reactive1/checkpoints/005000/pretrained_model
+    config_overrides:
+      optimizer_lr: 5.0e-5
+      scheduler_warmup_steps: 250
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_v2_l3boost2
+    root: data/lerobot/roarm_continuous_train_v2_l3boost2
+  steps: 15000
+  save_freq: 2500
+  output_dir: outputs/train/lerobot/diffusion_v2_l3boost_mild
+  job_name: roarm_diffusion_v2_l3boost_mild
+
+early_stop:
+  max_steps: 15000
+  stage_steps: 2500
+  patience: 2
+  episodes_per_task: 12

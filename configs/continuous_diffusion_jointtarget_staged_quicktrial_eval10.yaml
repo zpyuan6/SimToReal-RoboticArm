@@ -1,0 +1,12 @@
+base_config: continuous_diffusion_jointtarget_staged_quicktrial.yaml
+
+control:
+  official:
+    config_overrides:
+      n_obs_steps: 1
+      horizon: 8
+      n_action_steps: 1
+      drop_n_last_frames: 7
+      pretrained_backbone_weights: ResNet18_Weights.IMAGENET1K_V1
+      use_group_norm: false
+      num_inference_steps: 10

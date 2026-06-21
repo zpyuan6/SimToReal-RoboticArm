@@ -1,0 +1,21 @@
+base_config: continuous_act_l3only_full.yaml
+
+data_continuous:
+  train_path: data/continuous_l3only_tiny/train.npz
+  val_path: data/continuous_l3only_tiny/train.npz
+  test_path: data/continuous_l3only/test.npz
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_v2_l3only_tiny
+    root: data/lerobot/roarm_continuous_train_v2_l3only_tiny
+  steps: 10000
+  save_freq: 1000
+  output_dir: outputs/train/lerobot/act_v2_l3only_tiny
+  job_name: roarm_act_v2_l3only_tiny
+
+early_stop:
+  max_steps: 10000
+  stage_steps: 1000
+  patience: 3
+  episodes_per_task: 16

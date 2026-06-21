@@ -36,6 +36,23 @@ def _parse_args() -> argparse.Namespace:
         help="Comma-separated task names.",
     )
     parser.add_argument("--context-mode", choices=("neutral", "random"), default="neutral")
+    parser.add_argument(
+        "--episode-index",
+        type=int,
+        default=0,
+        help="Reset this many times before inspection so you can reproduce a specific audit episode index.",
+    )
+    parser.add_argument(
+        "--audit-replay",
+        action="store_true",
+        help="Advance RNG in the same task order as audit_continuous_expert so episode-index matches audit CSV.",
+    )
+    parser.add_argument(
+        "--audit-episodes-per-task",
+        type=int,
+        default=16,
+        help="Episodes per task used when --audit-replay is enabled.",
+    )
     parser.add_argument("--frame-sleep-s", type=float, default=0.03)
     return parser.parse_args()
 
@@ -323,8 +340,22 @@ def main() -> None:
         nonlocal last_action, last_reward, last_done
         task_name = tasks[task_index]
         context = neutral_context() if context_mode == "neutral" else None
-        env.reset(task_name=task_name, context=context)
-        expert.reset(task_name=task_name)
+        if args.audit_replay:
+            task_order = list(cfg["sim"]["tasks"])
+            if task_name not in task_order:
+                raise KeyError(f"Task {task_name} not found in config sim.tasks for audit replay.")
+            for warm_task in task_order:
+                warm_repeats = max(0, int(args.episode_index)) + 1 if warm_task == task_name else int(args.audit_episodes_per_task)
+                for _ in range(warm_repeats):
+                    env.reset(task_name=warm_task, context=context)
+                    expert.reset(task_name=warm_task)
+                if warm_task == task_name:
+                    break
+        else:
+            repeats = max(0, int(args.episode_index)) + 1
+            for _ in range(repeats):
+                env.reset(task_name=task_name, context=context)
+                expert.reset(task_name=task_name)
         last_action = None
         last_reward = None
         last_done = False

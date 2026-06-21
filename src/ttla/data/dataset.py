@@ -15,6 +15,14 @@ def _load_payload(path: str | Path) -> dict[str, np.ndarray]:
     return {key: payload[key] for key in payload.files}
 
 
+def _task_ids_from_states(states: np.ndarray) -> np.ndarray:
+    if states.shape[-1] >= 16:
+        return np.argmax(states[:, -4:-1], axis=-1).astype(np.int64)
+    if states.shape[-1] >= 2:
+        return np.rint(states[:, -2]).astype(np.int64)
+    return np.zeros(len(states), dtype=np.int64)
+
+
 class TrajectoryDataset(Dataset):
     def __init__(self, path: str | Path, primitive_vocabulary: str = PRIMITIVE_VOCAB_LEGACY) -> None:
         if primitive_vocabulary != PRIMITIVE_VOCAB_LEGACY:
@@ -225,10 +233,8 @@ class RealCalibrationDataset(Dataset):
         self._start_token = int(self.primitive_ids.max()) + 1 if len(self.primitive_ids) > 0 else 0
         if "tasks" in payload:
             self.tasks = payload["tasks"]
-        elif self.states.shape[-1] >= 2:
-            self.tasks = np.rint(self.states[:, -2]).astype(np.int64)
         else:
-            self.tasks = np.zeros(len(self.primitive_ids), dtype=np.int64)
+            self.tasks = _task_ids_from_states(self.states)
         if "stage_ids" in payload:
             self.stage_ids = payload["stage_ids"].astype(np.int64)
         else:

@@ -47,7 +47,11 @@ def _overlay(frame: np.ndarray, arrays: dict[str, np.ndarray], meta: dict, idx: 
     info_dict = info_raw if isinstance(info_raw, dict) else {}
     visibility = float(info_dict.get("visibility", 0.0))
     success = int(info_dict.get("success", meta.get("success", 0)))
-    task_id = int(round(float(state[-2]))) if len(state) >= 2 else -1
+    if len(state) >= 16:
+        task_slice = np.asarray(state[-4:-1], dtype=np.float32)
+        task_id = int(np.argmax(task_slice))
+    else:
+        task_id = int(round(float(state[-2]))) if len(state) >= 2 else -1
     progress = float(state[-1]) if len(state) >= 1 else 0.0
     lines = [
         f"Task: {meta.get('task', 'unknown')}",

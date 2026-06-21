@@ -1,0 +1,19 @@
+base_config: continuous_act_jointtarget_l2smooth_nohold_trial.yaml
+
+sim:
+  staged_resets:
+    level2_approach: level1_verify
+    level3_pick_place: level2_approach
+  staged_reset_max_attempts: 12
+
+data_continuous:
+  train_path: data/continuous_jointtarget_staged_trial/train.npz
+  val_path: data/continuous_jointtarget_staged_trial/val.npz
+  test_path: data/continuous_jointtarget_staged_trial/test.npz
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_jointtarget_staged_trial
+    root: data/lerobot/roarm_continuous_train_jointtarget_staged_trial
+  output_dir: outputs/train/lerobot/act_jointtarget_staged_trial
+  job_name: roarm_act_jointtarget_staged_trial

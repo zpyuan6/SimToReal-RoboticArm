@@ -5,7 +5,7 @@ control:
   backbone_name: smolvla
   family: lightweight_vla
   image_shape: [224, 224, 3]
-  proprio_dim: 14
+  proprio_dim: 16
   uses_language: true
   latent_adapter_target: multimodal_condition_latent
   official:

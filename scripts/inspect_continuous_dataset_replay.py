@@ -99,6 +99,12 @@ def _parse_args() -> argparse.Namespace:
         default="",
         help="Optional comma-separated task names to filter episodes before sampling.",
     )
+    parser.add_argument(
+        "--num",
+        type=int,
+        default=0,
+        help="If > 0, randomly sample this many episodes per task into a review pool before inspection.",
+    )
     parser.add_argument("--frame-sleep-s", type=float, default=0.03)
     return parser.parse_args()
 
@@ -312,6 +318,30 @@ def _load_records(payload: np.lib.npyio.NpzFile, task_filter: set[str]) -> list[
     return records
 
 
+def _sample_records_per_task(
+    records: list[EpisodeRecord],
+    *,
+    num_per_task: int,
+    rng: np.random.Generator,
+) -> list[EpisodeRecord]:
+    if num_per_task <= 0:
+        return records
+    by_task: dict[str, list[EpisodeRecord]] = {}
+    for record in records:
+        by_task.setdefault(record.task_name, []).append(record)
+    sampled: list[EpisodeRecord] = []
+    for task_name in sorted(by_task):
+        task_records = by_task[task_name]
+        if len(task_records) < num_per_task:
+            raise RuntimeError(
+                f"Requested --num {num_per_task}, but task {task_name} only has {len(task_records)} episodes after filtering."
+            )
+        chosen = rng.choice(len(task_records), size=num_per_task, replace=False)
+        sampled.extend(task_records[int(index)] for index in chosen)
+    order = rng.permutation(len(sampled))
+    return [sampled[int(index)] for index in order]
+
+
 def _restore_episode(env: ContinuousRoArmSimEnv, record: EpisodeRecord) -> None:
     context = context_from_full_vector(record.context_full)
     env.reset(task_name=record.task_name, context=context)
@@ -330,8 +360,20 @@ def main() -> None:
     payload_actions = payload["actions"].astype(np.float32)
     payload_success = payload["success"].astype(np.int64)
     task_filter = {token.strip() for token in args.tasks.split(",") if token.strip()}
-    records = _load_records(payload, task_filter)
     rng = np.random.default_rng(int(args.seed))
+    records = _sample_records_per_task(
+        _load_records(payload, task_filter),
+        num_per_task=int(args.num),
+        rng=rng,
+    )
+    if int(args.num) > 0:
+        task_counts: dict[str, int] = {}
+        for record in records:
+            task_counts[record.task_name] = task_counts.get(record.task_name, 0) + 1
+        print(
+            f"[dataset replay] review pool size={len(records)} sampled_per_task={int(args.num)} counts={task_counts}",
+            flush=True,
+        )
 
     env = ContinuousRoArmSimEnv(
         cfg["sim"],

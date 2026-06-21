@@ -1,0 +1,57 @@
+base_config: continuous_diffusion_template.yaml
+
+control:
+  action:
+    control_mode: joint_delta
+    action_dim: 6
+    horizon: 2
+    clamp_low: [-0.25, -0.25, -0.25, -0.25, -0.25, -0.5]
+    clamp_high: [0.25, 0.25, 0.25, 0.25, 0.25, 0.5]
+  official:
+    config_overrides:
+      n_obs_steps: 2
+      horizon: 8
+      n_action_steps: 2
+      drop_n_last_frames: 5
+      pretrained_backbone_weights: ResNet18_Weights.IMAGENET1K_V1
+      use_group_norm: false
+
+sim:
+  staged_resets:
+    level2_approach: level1_verify
+    level3_pick_place: level2_approach
+  staged_reset_max_attempts: 12
+
+continuous_expert:
+  max_arm_delta: 0.25
+  max_gripper_delta: 0.5
+
+data_continuous:
+  train_path: data/continuous_jointdelta_staged_quicktrial/train.npz
+  val_path: data/continuous_jointdelta_staged_quicktrial/val.npz
+  test_path: data/continuous_jointdelta_staged_quicktrial/test.npz
+  history_len: 2
+  action_horizon: 2
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_diffusion_jointdelta_staged_quicktrial
+    root: data/lerobot/roarm_continuous_train_diffusion_jointdelta_staged_quicktrial
+  batch_size: 8
+  steps: 30000
+  save_freq: 2500
+  eval_freq: 0
+  output_dir: outputs/train/lerobot/diffusion_jointdelta_staged_quicktrial
+  job_name: roarm_diffusion_jointdelta_staged_quicktrial
+  policy_device: cuda
+  wandb_enable: false
+
+early_stop:
+  enabled: true
+  max_steps: 30000
+  stage_steps: 2500
+  patience: 2
+  min_delta: 0.0
+  episodes_per_task: 12
+  validation_batch_size: 8
+  validation_max_batches: 64

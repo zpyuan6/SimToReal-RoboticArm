@@ -1,0 +1,13 @@
+base_config: continuous_act_jointtarget_l2smooth_trial.yaml
+
+data_continuous:
+  train_path: data/continuous_jointtarget_l2smooth_nohold_trial/train.npz
+  val_path: data/continuous_jointtarget_l2smooth_nohold_trial/val.npz
+  test_path: data/continuous_jointtarget_l2smooth_nohold_trial/test.npz
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_jointtarget_l2smooth_nohold_trial
+    root: data/lerobot/roarm_continuous_train_jointtarget_l2smooth_nohold_trial
+  output_dir: outputs/train/lerobot/act_jointtarget_l2smooth_nohold_trial
+  job_name: roarm_act_jointtarget_l2smooth_nohold_trial

@@ -1,0 +1,10 @@
+base_config: continuous_act_jointtarget_staged_visualdr_mix_head_finetune.yaml
+
+official_train:
+  output_dir: outputs/train/lerobot/act_jointtarget_staged_visualdr_mix_head_sweep
+  job_name: roarm_act_jointtarget_staged_visualdr_mix_head_sweep
+
+early_stop:
+  max_steps: 1500
+  stage_steps: 500
+  patience: 4

@@ -1,0 +1,27 @@
+base_config: continuous_diffusion_jointdelta_staged_nodrop_compact.yaml
+
+sim:
+  task_context_rescaling: false
+  context:
+    camera_translation_jitter: 0.015
+    camera_rotation_jitter: 0.03
+    fov_jitter: 6.0
+    light_jitter: 0.35
+    blur_sigma: 1.0
+    noise_std: 0.03
+    action_gain_low: 0.78
+    action_gain_high: 1.18
+    action_delay_max: 2
+    joint_bias: 0.09
+
+data_continuous:
+  train_path: data/continuous_jointdelta_staged_dr_trainlike/train.npz
+  val_path: data/continuous_jointdelta_staged_dr_trainlike/val.npz
+  test_path: data/continuous_jointdelta_staged_dr_trainlike/test.npz
+
+official_train:
+  dataset:
+    repo_id: roarm_continuous_train_diffusion_jointdelta_staged_dr_trainlike
+    root: data/lerobot/roarm_continuous_train_diffusion_jointdelta_staged_dr_trainlike
+  output_dir: outputs/train/lerobot/diffusion_jointdelta_staged_dr_trainlike
+  job_name: roarm_diffusion_jointdelta_staged_dr_trainlike

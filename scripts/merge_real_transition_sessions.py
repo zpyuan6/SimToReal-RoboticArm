@@ -69,7 +69,39 @@ def _concat_payloads(payloads: list[dict[str, np.ndarray]]) -> dict[str, np.ndar
             episode_offset = int(current_episode_ids.max()) + 1
         for key, value in current.items():
             merged.setdefault(key, []).append(value)
-    return {key: np.concatenate(values, axis=0) for key, values in merged.items()}
+    return {key: _concat_field(key, values) for key, values in merged.items()}
+
+
+def _concat_field(key: str, values: list[np.ndarray]) -> np.ndarray:
+    try:
+        return np.concatenate(values, axis=0)
+    except ValueError:
+        if key not in {"states", "next_states", "contexts"}:
+            raise
+        padded = _pad_feature_arrays(values)
+        return np.concatenate(padded, axis=0)
+
+
+def _pad_feature_arrays(values: list[np.ndarray]) -> list[np.ndarray]:
+    ranks = {value.ndim for value in values}
+    if len(ranks) != 1:
+        raise ValueError(f"Cannot merge feature arrays with different ranks: {sorted(ranks)}")
+    ndim = values[0].ndim
+    if ndim <= 1:
+        return values
+    target_shape = [max(value.shape[dim] for value in values) for dim in range(1, ndim)]
+    padded: list[np.ndarray] = []
+    for value in values:
+        pad_width = [(0, 0)]
+        needs_padding = False
+        for dim, target in enumerate(target_shape, start=1):
+            delta = target - value.shape[dim]
+            if delta < 0:
+                raise ValueError("Internal error while padding feature arrays.")
+            needs_padding = needs_padding or delta > 0
+            pad_width.append((0, delta))
+        padded.append(np.pad(value, pad_width, mode="constant") if needs_padding else value)
+    return padded
 
 
 def _write_manifest(path: Path, rows: list[dict[str, Any]]) -> None:

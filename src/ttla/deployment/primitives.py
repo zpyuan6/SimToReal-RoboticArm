@@ -30,7 +30,8 @@ REAL_HOME_QPOS = np.deg2rad(np.asarray([0.0, 0.0, 90.0, 0.0, 0.0, 170.0], dtype=
 REAL_OBS_CENTER_QPOS = np.asarray([0.0, np.deg2rad(12.0), 2.6, np.deg2rad(18.0), 0.0, np.deg2rad(158.0)], dtype=np.float32)
 REAL_OBS_LEFT_QPOS = np.asarray([np.deg2rad(30.0), np.deg2rad(12.0), 2.6, np.deg2rad(18.0), 0.0, np.deg2rad(158.0)], dtype=np.float32)
 REAL_OBS_RIGHT_QPOS = np.asarray([np.deg2rad(-30.0), np.deg2rad(12.0), 2.6, np.deg2rad(18.0), 0.0, np.deg2rad(158.0)], dtype=np.float32)
-REAL_APPROACH_QPOS = np.deg2rad(np.asarray([0.0, 13.4, 111.7, 29.4, 0.0, 154.0], dtype=np.float32))
+REAL_APPROACH_QPOS = np.deg2rad(np.asarray([0.0, 32.1, 130.6, -32.1, 0.0, 154.0], dtype=np.float32))
+REAL_RETREAT_ARM_QPOS = np.deg2rad(np.asarray([0.0, 13.8, 149.0, -32.1, 0.0], dtype=np.float32))
 REAL_PREGRASP_QPOS = np.deg2rad(np.asarray([0.0, 21.0, 114.0, -1.0, 0.0, 156.0], dtype=np.float32))
 REAL_LIFT_QPOS = np.deg2rad(np.asarray([0.0, -8.0, 96.0, -8.0, 0.0, 180.0], dtype=np.float32))
 REAL_TRANSPORT_QPOS = np.deg2rad(np.asarray([-20.0, 6.0, 139.0, -12.0, 0.0, 180.0], dtype=np.float32))
@@ -69,7 +70,7 @@ class PrimitiveExecutor:
             self._goto(REAL_APPROACH_QPOS)
             return PrimitiveResult(True, False, False, {"primitive_name": name})
         if primitive_id_value == RETREAT_ID:
-            self._delta(np.asarray([0.0, 0.10, 0.14, -0.06, 0.0, 0.10], dtype=np.float32))
+            self._goto_arm_preserve_gripper(REAL_RETREAT_ARM_QPOS)
             return PrimitiveResult(True, False, False, {"primitive_name": name})
         if primitive_id_value == PREGRASP_SERVO_ID:
             self._goto(REAL_PREGRASP_QPOS)
@@ -115,4 +116,9 @@ class PrimitiveExecutor:
     def _set_gripper(self, value: float) -> None:
         q_target = self.current_q.copy()
         q_target[5] = np.clip(value, REAL_GRIPPER_MIN_QPOS, REAL_GRIPPER_MAX_QPOS)
+        self._goto(q_target)
+
+    def _goto_arm_preserve_gripper(self, arm_target: np.ndarray) -> None:
+        q_target = self.current_q.copy()
+        q_target[:5] = np.asarray(arm_target, dtype=np.float32)
         self._goto(q_target)

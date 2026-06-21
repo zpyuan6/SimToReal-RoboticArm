@@ -65,6 +65,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--auto-start", action="store_true")
     parser.add_argument("--auto-accept", action="store_true")
     parser.add_argument("--save-preview", action="store_true")
+    parser.add_argument("--live-preview", action="store_true", help="Show the OpenCV live preview window during collection.")
     return parser.parse_args()
 
 
@@ -139,6 +140,8 @@ def _load_plan_session(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
         merged["auto_accept"] = True
     if args.save_preview:
         merged["save_preview"] = True
+    if args.live_preview:
+        merged["live_preview"] = True
     return merged, args.session
 
 
@@ -169,6 +172,22 @@ def _prompt_continue(prompt: str) -> bool:
         if answer in {"q", "quit", "n", "no"}:
             return False
         print("Please enter Enter/y to continue or q/n to stop.")
+
+
+def _print_episode_prompt(
+    episode_name: str,
+    task_name: str,
+    layout_tag: str,
+    primitive_sequence: list[int],
+    placement_guide: list[str],
+) -> None:
+    print()
+    print(f"[{episode_name}] task={task_name} layout={layout_tag}")
+    print("Sequence:", " -> ".join(primitive_name(pid) for pid in primitive_sequence))
+    if placement_guide:
+        print("Placement guide:")
+        for guide in placement_guide:
+            print(f"  - {guide}")
 
 
 def _draw_live_preview(
@@ -251,13 +270,13 @@ def _preview_and_confirm_start(
     decision_ready = threading.Event()
     decision: dict[str, bool] = {"continue": False}
 
-    print()
-    print(f"[{episode_name}] task={task_name} layout={layout_tag}")
-    print("Sequence:", " -> ".join(primitive_name(pid) for pid in primitive_sequence))
-    if placement_guide:
-        print("Placement guide:")
-        for guide in placement_guide:
-            print(f"  - {guide}")
+    _print_episode_prompt(
+        episode_name=episode_name,
+        task_name=task_name,
+        layout_tag=layout_tag,
+        primitive_sequence=primitive_sequence,
+        placement_guide=placement_guide,
+    )
 
     def _read_terminal_decision() -> None:
         try:
@@ -391,6 +410,7 @@ def main() -> None:
     auto_start = bool(session_spec.get("auto_start", False))
     auto_accept = bool(session_spec.get("auto_accept", False))
     save_preview = bool(session_spec.get("save_preview", False))
+    live_preview = bool(session_spec.get("live_preview", False))
     reset_between_episodes = bool(session_spec.get("reset_between_episodes", deploy_cfg.get("safety", {}).get("reset_before_episode", True)))
     operator = str(session_spec.get("operator", ""))
     notes = str(session_spec.get("notes", ""))
@@ -428,14 +448,24 @@ def main() -> None:
                 time.sleep(1.5)
 
             if not auto_start:
-                should_continue = _preview_and_confirm_start(
-                    runner,
-                    episode_name=episode_name,
-                    task_name=task_name,
-                    layout_tag=layout_tag,
-                    primitive_sequence=primitive_sequence,
-                    placement_guide=list(session_spec.get("placement_guide", [])),
-                )
+                if live_preview:
+                    should_continue = _preview_and_confirm_start(
+                        runner,
+                        episode_name=episode_name,
+                        task_name=task_name,
+                        layout_tag=layout_tag,
+                        primitive_sequence=primitive_sequence,
+                        placement_guide=list(session_spec.get("placement_guide", [])),
+                    )
+                else:
+                    _print_episode_prompt(
+                        episode_name=episode_name,
+                        task_name=task_name,
+                        layout_tag=layout_tag,
+                        primitive_sequence=primitive_sequence,
+                        placement_guide=list(session_spec.get("placement_guide", [])),
+                    )
+                    should_continue = _prompt_continue("Check the external camera view, then press Enter to execute or q to stop: ")
                 if not should_continue:
                     break
 
@@ -464,14 +494,17 @@ def main() -> None:
                     step_idx=step_index,
                     horizon=len(primitive_sequence),
                 )
-                result = _run_primitive_with_live_preview(
-                    runner,
-                    primitive_idx,
-                    episode_name=episode_name,
-                    task_name=task_name,
-                    step_index=step_index,
-                    total_steps=len(primitive_sequence),
-                )
+                if live_preview:
+                    result = _run_primitive_with_live_preview(
+                        runner,
+                        primitive_idx,
+                        episode_name=episode_name,
+                        task_name=task_name,
+                        step_index=step_index,
+                        total_steps=len(primitive_sequence),
+                    )
+                else:
+                    result = runner.executor.run(primitive_idx)
                 current_q = runner.executor.current_q.copy()
                 flags.apply(primitive_idx)
                 after = runner.camera.read()
@@ -550,7 +583,8 @@ def main() -> None:
             next_episode_id += 1
     finally:
         runner.close()
-        cv2.destroyAllWindows()
+        if live_preview:
+            cv2.destroyAllWindows()
 
     dataset_path = session_dir / "session_dataset.npz"
     camera_width = int(deploy_cfg.get("camera", {}).get("width", 640))
@@ -592,6 +626,7 @@ def main() -> None:
         "config_path": session_spec.get("config", args.config),
         "deploy_config_path": session_spec.get("deploy_config", args.deploy_config),
         "primitive_sleep_s": float(deploy_cfg.get("runtime", {}).get("primitive_sleep_s", 0.8)),
+        "live_preview": live_preview,
         "session_key": session_key,
         "session_dir": str(session_dir),
         "session_dataset_path": str(dataset_path),

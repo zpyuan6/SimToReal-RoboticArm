@@ -284,6 +284,29 @@ def _prompt_continue_with_live_preview(camera: Any, prompt: str, enabled: bool) 
     return bool(decision["continue"])
 
 
+def _prompt_accept_with_live_preview(camera: Any, enabled: bool) -> str:
+    if not enabled:
+        return _prompt_accept()
+
+    cv2.namedWindow(LIVE_WINDOW_NAME, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_EXPANDED)
+    decision_ready = threading.Event()
+    decision: dict[str, str] = {"value": "keep"}
+
+    def _read_terminal_decision() -> None:
+        try:
+            decision["value"] = _prompt_accept()
+        finally:
+            decision_ready.set()
+
+    input_thread = threading.Thread(target=_read_terminal_decision, daemon=True)
+    input_thread.start()
+    while not decision_ready.is_set():
+        _show_live_frame(camera.read(), enabled=True)
+        time.sleep(0.03)
+    input_thread.join(timeout=0.1)
+    return str(decision["value"])
+
+
 def _sleep_with_live_preview(camera: Any, seconds: float, enabled: bool) -> None:
     if not enabled:
         time.sleep(seconds)
@@ -365,6 +388,8 @@ def main() -> None:
     reset_between_episodes = bool(spec.get("reset_between_episodes", True))
     save_preview = bool(spec.get("save_preview", False))
     live_preview = bool(spec.get("live_preview", True))
+    reset_settle_s = float(spec.get("reset_settle_s", 1.5 if not args.dry_run else 0.1))
+    post_episode_settle_s = float(spec.get("post_episode_settle_s", 1.5 if not args.dry_run else 0.1))
     selected_formats = _action_formats(str(spec.get("action_format", "both")))
 
     if args.dry_run:
@@ -390,6 +415,11 @@ def main() -> None:
             while repeat_idx < sequence_repeats:
                 episode_name = f"{sequence_name}_r{repeat_idx:02d}"
                 planned = _planned_targets(waypoints, start_q=REAL_HOME_QPOS, max_step=max_step)
+                if reset_between_episodes:
+                    robot.reset_pose()
+                    _sleep_with_live_preview(camera, reset_settle_s, live_preview)
+                    robot.move_joint_vector(REAL_HOME_QPOS)
+                    _sleep_with_live_preview(camera, reset_settle_s, live_preview)
                 if not auto_start:
                     prompt = (
                         f"[{episode_name}] task={task_name} waypoints={waypoints} "
@@ -397,9 +427,6 @@ def main() -> None:
                     )
                     if not _prompt_continue_with_live_preview(camera, prompt, live_preview):
                         raise KeyboardInterrupt
-                if reset_between_episodes:
-                    robot.reset_pose()
-                    time.sleep(1.0 if args.dry_run else 1.5)
                 current_q = REAL_HOME_QPOS.copy()
                 local_records: list[TransitionRecord] = []
                 for local_step, (waypoint_name, target_q) in enumerate(planned):
@@ -447,7 +474,8 @@ def main() -> None:
                     )
                     local_records.append(record)
                     current_q = target_q.copy()
-                decision = "keep" if auto_accept else _prompt_accept()
+                _sleep_with_live_preview(camera, post_episode_settle_s, live_preview)
+                decision = "keep" if auto_accept else _prompt_accept_with_live_preview(camera, live_preview)
                 if decision == "quit":
                     raise KeyboardInterrupt
                 if decision == "redo":
@@ -507,6 +535,8 @@ def main() -> None:
         "action_formats": selected_formats,
         "max_joint_step_rad": max_step,
         "step_sleep_s": step_sleep_s,
+        "reset_settle_s": reset_settle_s,
+        "post_episode_settle_s": post_episode_settle_s,
         "episodes_collected": len(episode_meta),
         "transitions_collected": len(all_records),
         "dry_run": bool(args.dry_run),

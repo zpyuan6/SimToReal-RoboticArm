@@ -424,6 +424,8 @@ def main() -> None:
                 runner.robot.reset_pose()
                 time.sleep(1.5)
                 runner.executor.current_q = REAL_HOME_QPOS.copy()
+                runner.robot.move_joint_vector(runner.executor.current_q)
+                time.sleep(1.5)
 
             if not auto_start:
                 should_continue = _preview_and_confirm_start(

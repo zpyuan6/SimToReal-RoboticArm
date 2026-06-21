@@ -16,7 +16,7 @@ from ttla.utils.io import ensure_dir
 
 
 WINDOW_NAME = "RoArm Live Monitor"
-DEFAULT_TARGET = {"b": 0.0, "s": 0.0, "e": 1.4}
+DEFAULT_TARGET = {"b": 0.0, "s": 0.0, "e": 1.4, "t": 0.0}
 JOINT_LIMITS = {
     # RoArm base is documented over roughly -180..180 deg.
     "b": (-float(np.pi), float(np.pi)),
@@ -25,6 +25,9 @@ JOINT_LIMITS = {
     # RoArm elbow is documented over roughly 0..180 deg; keep the manual
     # monitor aligned with that range instead of the older narrow debug band.
     "e": (0.0, float(np.pi)),
+    # Wrist tilt. The approach/search workflow only needs the documented
+    # central working range, which keeps manual probing away from hard stops.
+    "t": (-float(np.pi / 2.0), float(np.pi / 2.0)),
 }
 FEEDBACK_KEYS = ("b", "s", "e", "t", "r", "h")
 
@@ -87,12 +90,14 @@ def _draw_panel(
         f"Base target: {np.rad2deg(targets['b']):.1f} deg",
         f"Shoulder target: {np.rad2deg(targets['s']):.1f} deg",
         f"Elbow target: {np.rad2deg(targets['e']):.1f} deg",
+        f"Wrist target: {np.rad2deg(targets['t']):.1f} deg",
         f"Snapshots: {snapshot_count}",
         f"Session: {session_dir.name}",
         "Controls:",
         "a/d base -, +",
         "w/s shoulder -, +",
         "z/x elbow -, +",
+        "c/v wrist -, +",
         "f feedback, r reset, p snapshot, q quit",
     ]
     y = 30
@@ -105,6 +110,7 @@ def _draw_panel(
             f"Feedback b: {last_feedback_joints.get('b', float('nan')):.1f} deg",
             f"Feedback s: {last_feedback_joints.get('s', float('nan')):.1f} deg",
             f"Feedback e: {last_feedback_joints.get('e', float('nan')):.1f} deg",
+            f"Feedback t: {last_feedback_joints.get('t', float('nan')):.1f} deg",
         ]
         for line in feedback_lines:
             cv2.putText(panel, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (24, 92, 56), 1)
@@ -208,13 +214,19 @@ def main() -> None:
             elif key == ord("x"):
                 _apply_delta(targets, "e", 0.08)
                 changed = True
+            elif key == ord("c"):
+                _apply_delta(targets, "t", -0.08)
+                changed = True
+            elif key == ord("v"):
+                _apply_delta(targets, "t", 0.08)
+                changed = True
 
             if changed and serial_enabled:
                 robot.move_joints(
                     targets["b"],
                     targets["s"],
                     targets["e"],
-                    0.0,
+                    targets["t"],
                     0.0,
                     3.14,
                 )

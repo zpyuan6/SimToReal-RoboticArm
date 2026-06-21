@@ -107,15 +107,15 @@
 6. 每个插值小步都会保存 before 图像、动作、after 图像。
 7. episode 结束后，选择 `keep`、`redo` 或 `quit`。
 
-当前计划使用论文级 transition 采集规模：
+当前计划使用快速 pilot transition 采集规模，约为原论文级计划的 1/5：
 
 ```text
-configs/continuous_real_collection_plan_v1.yaml -> shared.repeats: 10
-configs/continuous_real_collection_plan_v1.yaml -> calib_l3_center.repeats: 15
-configs/continuous_real_collection_plan_v1.yaml -> heldout_l3_offset.repeats: 15
+configs/continuous_real_collection_plan_v1.yaml -> shared.repeats: 2
+configs/continuous_real_collection_plan_v1.yaml -> calib_l3_center.repeats: 3
+configs/continuous_real_collection_plan_v1.yaml -> heldout_l3_offset.repeats: 3
 ```
 
-因此 L1/L2 每个 sequence 采集 10 次 repeat，L3 每个 sequence 采集 15 次 repeat。
+因此 L1/L2 每个 sequence 采集 2 次 repeat，L3 每个 sequence 采集 3 次 repeat。
 
 每一次 repeat 都应轻微调整目标位置或朝向：
 
@@ -176,7 +176,7 @@ configs/continuous_real_collection_plan_v1.yaml -> heldout_l3_offset.repeats: 15
   - `obs_left -> obs_center`
   - `obs_right -> obs_center`
   - `obs_center`
-- 每个 sequence 默认重复 4 次。
+- 每个 sequence 默认重复 2 次。
 - 每条 episode 开始前会 reset 到 home。
 - 动作是预定义观测 waypoint 之间的关节插值。
 - 脚本保存 L1 的真实图像、关节状态、`joint_target` 和 `joint_delta`。
@@ -223,7 +223,7 @@ configs/continuous_real_collection_plan_v1.yaml -> heldout_l3_offset.repeats: 15
   - `obs_center -> approach -> pregrasp`
   - `obs_left -> obs_center -> approach -> pregrasp`
   - `obs_right -> obs_center -> approach -> pregrasp`
-- 每个 sequence 默认重复 4 次。
+- 每个 sequence 默认重复 2 次。
 - 动作是预定义观察、接近、预抓取 waypoint 之间的关节插值。
 - 脚本不会在线计算目标中心，目标需要按协议放在这些 waypoint 可接近的位置。
 
@@ -268,7 +268,7 @@ configs/continuous_real_collection_plan_v1.yaml -> heldout_l3_offset.repeats: 15
 - 脚本会采集两个 sequence：
   - `obs_center -> approach -> pregrasp -> grasp_close -> lift -> transport -> place_release -> retreat`
   - `obs_left -> obs_center -> approach -> pregrasp -> grasp_close -> lift -> transport -> place_release -> retreat`
-- 每个 sequence 默认重复 4 次。
+- 每个 sequence 默认重复 3 次。
 - `grasp_close` 会在当前位姿直接闭合夹爪。
 - `lift` 抬起物体。
 - `transport` 移动到蓝色区域上方。
@@ -512,28 +512,28 @@ configs/continuous_real_collection_plan_v1.yaml -> heldout_l3_offset.repeats: 15
 1. real calibration/heldout transition 数据：用于训练 adapter、做离线 transition 检查。
 2. real policy rollout 数据：用于最终论文成功率结论。
 
-当前 `configs/continuous_real_collection_plan_v1.yaml` 已经设置为论文级 transition 采集规模：
+当前 `configs/continuous_real_collection_plan_v1.yaml` 默认设置为快速 pilot transition 采集规模，约为论文级完整计划的 1/5：
 
-- calibration transition：每个任务 30 episodes。
-- heldout transition：每个任务 30 episodes。
-- 总计：180 episodes。
+- calibration transition：每个任务 6 episodes。
+- heldout transition：每个任务 6 episodes。
+- 总计：36 episodes。
 
 按当前 sequence 设计，对应设置为：
 
 | session | repeats | expected episodes | expected transitions |
 |---|---:|---:|---:|
-| `calib_l1_center` | 10 | 30 | 140 |
-| `calib_l2_center` | 10 | 30 | 290 |
-| `calib_l3_center` | 15 | 30 | 660 |
-| `heldout_l1_offset` | 10 | 30 | 140 |
-| `heldout_l2_offset` | 10 | 30 | 290 |
-| `heldout_l3_offset` | 15 | 30 | 660 |
+| `calib_l1_center` | 2 | 6 | 28 |
+| `calib_l2_center` | 2 | 6 | 58 |
+| `calib_l3_center` | 3 | 6 | 132 |
+| `heldout_l1_offset` | 2 | 6 | 28 |
+| `heldout_l2_offset` | 2 | 6 | 58 |
+| `heldout_l3_offset` | 3 | 6 | 132 |
 
 总计：
 
-- calibration：90 episodes，1090 transitions。
-- heldout：90 episodes，1090 transitions。
-- 全部 transition 数据：180 episodes，2180 transitions。
+- calibration：18 episodes，218 transitions。
+- heldout：18 episodes，218 transitions。
+- 全部 transition 数据：36 episodes，436 transitions。
 - 每条真实 transition 同时保存 `joint_target` 和 `joint_delta` 两种动作表示。
 
 这些数据可以支持：

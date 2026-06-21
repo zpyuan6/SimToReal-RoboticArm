@@ -2,7 +2,7 @@ shared:
   config: configs/continuous_act_jointtarget_staged_frozen_best.yaml
   deploy_config: configs/deployment_l3.yaml
   output_root: data/real_continuous_v1/sessions
-  repeats: 10
+  repeats: 2
   action_format: both
   motion_spd: 25
   motion_acc: 25
@@ -23,11 +23,11 @@ shared:
     - 如果相机或机械臂底座移动过，需要重新采集完整协议。
     - 记录运动过程中如果有人手留在相机画面中，该 episode 必须重采。
   collection_target:
-    purpose: paper_grade_real_transition_collection
-    calibration_episodes_per_task: 30
-    heldout_episodes_per_task: 30
-    total_expected_episodes: 180
-    total_expected_transitions: 2180
+    purpose: fast_pilot_real_transition_collection
+    calibration_episodes_per_task: 6
+    heldout_episodes_per_task: 6
+    total_expected_episodes: 36
+    total_expected_transitions: 436
   repeat_placement_policy:
     - 每一次 repeat 都应轻微调整目标位置或朝向，避免采集完全重复的同一画面。
     - 标定集只做小扰动，目标仍应保持在 center_band 可达区域内。
@@ -74,7 +74,7 @@ sessions:
     task: level3_pick_place
     split_role: calibration
     layout_tag: center_band
-    repeats: 15
+    repeats: 3
     notes: 中心区域目标摆放下的完整抓取与放置连续 transition。
     placement_guide:
       - 使用可达的中心区域目标摆放。
@@ -125,7 +125,7 @@ sessions:
     task: level3_pick_place
     split_role: heldout
     layout_tag: front_left_front_right
-    repeats: 15
+    repeats: 3
     notes: 使用不同目标摆放的 held-out 完整抓取与放置 transition。
     placement_guide:
       - 使用 calibration L3 中未出现过的偏前、偏左或偏右摆放。

@@ -18,6 +18,8 @@ from ttla.sim.task_defs import TASK_TO_ID, supervision_stage_id
 from ttla.task_runtime import build_runtime_state
 from ttla.utils.io import ensure_dir, save_npz, write_json
 
+PREVIEW_WINDOW_NAME = "TTLA Real Collection Preview"
+
 
 @dataclass
 class RuntimeFlags:
@@ -168,6 +170,75 @@ def _prompt_continue(prompt: str) -> bool:
         print("Please enter Enter/y to continue or q/n to stop.")
 
 
+def _draw_live_preview(
+    frame: np.ndarray,
+    episode_name: str,
+    task_name: str,
+    layout_tag: str,
+    primitive_sequence: list[int],
+    placement_guide: list[str],
+) -> np.ndarray:
+    view = cv2.resize(frame, (800, 600))
+    panel = np.full((600, 460, 3), 246, dtype=np.uint8)
+
+    def _put(text: str, y: int, scale: float = 0.56, color: tuple[int, int, int] = (36, 40, 48), thickness: int = 1) -> int:
+        cv2.putText(panel, text, (18, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, lineType=cv2.LINE_AA)
+        return y + 28
+
+    y = 32
+    y = _put("Real Collection Preview", y, 0.8, (24, 28, 36), 2)
+    y += 8
+    y = _put(f"Episode: {episode_name}", y)
+    y = _put(f"Task: {task_name}", y)
+    y = _put(f"Layout: {layout_tag}", y)
+    y += 6
+    y = _put("Sequence:", y, 0.62, (52, 64, 92), 1)
+    sequence_text = " -> ".join(primitive_name(pid) for pid in primitive_sequence)
+    for chunk_start in range(0, len(sequence_text), 32):
+        y = _put(sequence_text[chunk_start : chunk_start + 32], y, 0.5, (70, 78, 92), 1)
+    y += 6
+    y = _put("Placement guide:", y, 0.62, (52, 64, 92), 1)
+    for guide in placement_guide[:6]:
+        line = f"- {guide}"
+        for chunk_start in range(0, len(line), 44):
+            y = _put(line[chunk_start : chunk_start + 44], y, 0.46, (76, 82, 94), 1)
+    y = min(y + 10, 520)
+    y = _put("Controls:", y, 0.62, (52, 64, 92), 1)
+    y = _put("Enter / Space: start episode", y, 0.48, (76, 82, 94), 1)
+    y = _put("Q / Esc: quit session", y, 0.48, (76, 82, 94), 1)
+    y = _put("Check target stays in the required band.", y + 8, 0.48, (76, 82, 94), 1)
+
+    return np.concatenate([view, panel], axis=1)
+
+
+def _preview_and_confirm_start(
+    runner: DeploymentRunner,
+    episode_name: str,
+    task_name: str,
+    layout_tag: str,
+    primitive_sequence: list[int],
+    placement_guide: list[str],
+) -> bool:
+    cv2.namedWindow(PREVIEW_WINDOW_NAME, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_EXPANDED)
+    cv2.resizeWindow(PREVIEW_WINDOW_NAME, 1280, 680)
+    while True:
+        frame = runner.camera.read()
+        dashboard = _draw_live_preview(
+            frame,
+            episode_name=episode_name,
+            task_name=task_name,
+            layout_tag=layout_tag,
+            primitive_sequence=primitive_sequence,
+            placement_guide=placement_guide,
+        )
+        cv2.imshow(PREVIEW_WINDOW_NAME, dashboard)
+        key = cv2.waitKey(50) & 0xFF
+        if key in (13, 32):
+            return True
+        if key in (ord("q"), 27):
+            return False
+
+
 def _prompt_accept() -> str:
     while True:
         answer = input("Keep this episode [k], redo [r], or quit [q]? ").strip().lower()
@@ -254,9 +325,13 @@ def main() -> None:
             layout_tag = str(episode_spec.get("layout_tag", "unspecified"))
             primitive_sequence = list(episode_spec["primitive_ids"])
             if not auto_start:
-                should_continue = _prompt_continue(
-                    f"[{episode_name}] layout={layout_tag} | task={task_name} | "
-                    f"steps={len(primitive_sequence)}. Press Enter to execute or q to stop: "
+                should_continue = _preview_and_confirm_start(
+                    runner,
+                    episode_name=episode_name,
+                    task_name=task_name,
+                    layout_tag=layout_tag,
+                    primitive_sequence=primitive_sequence,
+                    placement_guide=list(session_spec.get("placement_guide", [])),
                 )
                 if not should_continue:
                     break
@@ -369,6 +444,7 @@ def main() -> None:
             next_episode_id += 1
     finally:
         runner.close()
+        cv2.destroyAllWindows()
 
     dataset_path = session_dir / "session_dataset.npz"
     camera_width = int(deploy_cfg.get("camera", {}).get("width", 640))

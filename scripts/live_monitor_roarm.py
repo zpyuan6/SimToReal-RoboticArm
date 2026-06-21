@@ -84,8 +84,8 @@ def _draw_panel(
     frame = cv2.resize(frame, (640, 480))
     cv2.putText(frame, "USB Camera", (14, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (25, 25, 25), 2)
 
-    panel = np.full((480, 360, 3), 248, dtype=np.uint8)
-    lines = [
+    panel = np.full((480, 480, 3), 248, dtype=np.uint8)
+    status_lines = [
         f"Serial: {'enabled' if serial_enabled else 'camera-only'}",
         f"Base target: {np.rad2deg(targets['b']):.1f} deg",
         f"Shoulder target: {np.rad2deg(targets['s']):.1f} deg",
@@ -93,17 +93,33 @@ def _draw_panel(
         f"Wrist target: {np.rad2deg(targets['t']):.1f} deg",
         f"Snapshots: {snapshot_count}",
         f"Session: {session_dir.name}",
-        "Controls:",
+    ]
+    control_lines = [
         "a/d base -, +",
         "w/s shoulder -, +",
         "z/x elbow -, +",
         "c/v wrist -, +",
-        "f feedback, r reset, p snapshot, q quit",
+        "f feedback",
+        "r reset",
+        "p snapshot",
+        "q quit",
     ]
-    y = 30
-    for line in lines:
-        cv2.putText(panel, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (35, 35, 35), 1)
-        y += 24
+
+    cv2.putText(panel, "Targets", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (35, 35, 35), 1)
+    y = 54
+    for line in status_lines:
+        cv2.putText(panel, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (35, 35, 35), 1)
+        y += 22
+
+    cv2.putText(panel, "Controls", (270, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (35, 35, 35), 1)
+    control_y = 54
+    for line in control_lines:
+        cv2.putText(panel, line, (270, control_y), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (35, 35, 35), 1)
+        control_y += 22
+
+    feedback_y = max(y + 16, 240)
+    cv2.putText(panel, "Feedback", (12, feedback_y), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (35, 35, 35), 1)
+    feedback_y += 26
 
     if last_feedback_joints:
         feedback_lines = [
@@ -113,15 +129,22 @@ def _draw_panel(
             f"Feedback t: {last_feedback_joints.get('t', float('nan')):.1f} deg",
         ]
         for line in feedback_lines:
-            cv2.putText(panel, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (24, 92, 56), 1)
-            y += 22
+            cv2.putText(panel, line, (12, feedback_y), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (24, 92, 56), 1)
+            feedback_y += 22
     else:
-        cv2.putText(panel, "Feedback b/s/e: unavailable", (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (120, 120, 120), 1)
-        y += 22
+        cv2.putText(
+            panel,
+            "Feedback b/s/e/t: unavailable",
+            (12, feedback_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.48,
+            (120, 120, 120),
+            1,
+        )
 
-    cv2.putText(panel, "Last command", (12, 372), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (35, 35, 35), 1)
-    cv2.putText(panel, last_command[:44], (12, 398), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (55, 55, 55), 1)
-    cv2.putText(panel, last_command[44:88], (12, 418), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (55, 55, 55), 1)
+    cv2.putText(panel, "Last command", (12, 402), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (35, 35, 35), 1)
+    cv2.putText(panel, last_command[:58], (12, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.43, (55, 55, 55), 1)
+    cv2.putText(panel, last_command[58:116], (12, 452), cv2.FONT_HERSHEY_SIMPLEX, 0.43, (55, 55, 55), 1)
     return np.concatenate([frame, panel], axis=1)
 
 

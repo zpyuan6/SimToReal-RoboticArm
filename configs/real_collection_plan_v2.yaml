@@ -11,6 +11,8 @@ shared:
   auto_start: false
   auto_accept: false
   live_preview: true
+  record_episode_video: true
+  episode_video_fps: 10.0
   save_preview: true
   object_name: wire_ear_cork
   dropzone_name: blue_dropzone

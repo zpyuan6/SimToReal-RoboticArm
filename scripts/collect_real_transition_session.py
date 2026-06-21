@@ -106,6 +106,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--auto-accept", action="store_true")
     parser.add_argument("--save-preview", action="store_true")
     parser.add_argument("--live-preview", action="store_true", help="Show the OpenCV live preview window during collection.")
+    parser.add_argument("--record-episode-video", action="store_true", help="Record a continuous MP4 for each accepted episode.")
     parser.add_argument("--post-primitive-settle-s", type=float, default=None, help="Extra settle time after each primitive before capturing the after-frame.")
     return parser.parse_args()
 
@@ -183,6 +184,8 @@ def _load_plan_session(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
         merged["save_preview"] = True
     if args.live_preview:
         merged["live_preview"] = True
+    if args.record_episode_video:
+        merged["record_episode_video"] = True
     if args.post_primitive_settle_s is not None:
         merged["post_primitive_settle_s"] = float(args.post_primitive_settle_s)
     return merged, args.session
@@ -351,6 +354,8 @@ def _run_primitive_with_live_preview(
     runner: DeploymentRunner,
     frame_buffer: CameraFrameBuffer,
     primitive_idx: int,
+    live_preview: bool,
+    video_writer: cv2.VideoWriter | None,
     episode_name: str,
     task_name: str,
     step_index: int,
@@ -370,6 +375,27 @@ def _run_primitive_with_live_preview(
     primitive_label = primitive_name(primitive_idx)
     while not done_event.is_set():
         frame = frame_buffer.read()
+        if video_writer is not None:
+            video_writer.write(frame)
+        if live_preview:
+            dashboard = _draw_execution_preview(
+                frame,
+                episode_name=episode_name,
+                task_name=task_name,
+                primitive_label=primitive_label,
+                step_index=step_index,
+                total_steps=total_steps,
+            )
+            cv2.imshow(PREVIEW_WINDOW_NAME, dashboard)
+            cv2.waitKey(50)
+        else:
+            time.sleep(0.05)
+
+    worker.join(timeout=0.1)
+    frame = frame_buffer.read()
+    if video_writer is not None:
+        video_writer.write(frame)
+    if live_preview:
         dashboard = _draw_execution_preview(
             frame,
             episode_name=episode_name,
@@ -379,20 +405,7 @@ def _run_primitive_with_live_preview(
             total_steps=total_steps,
         )
         cv2.imshow(PREVIEW_WINDOW_NAME, dashboard)
-        cv2.waitKey(50)
-
-    worker.join(timeout=0.1)
-    frame = frame_buffer.read()
-    dashboard = _draw_execution_preview(
-        frame,
-        episode_name=episode_name,
-        task_name=task_name,
-        primitive_label=primitive_label,
-        step_index=step_index,
-        total_steps=total_steps,
-    )
-    cv2.imshow(PREVIEW_WINDOW_NAME, dashboard)
-    cv2.waitKey(1)
+        cv2.waitKey(1)
     return result_box["result"]
 
 
@@ -400,6 +413,7 @@ def _wait_after_primitive(
     frame_buffer: CameraFrameBuffer,
     settle_s: float,
     live_preview: bool,
+    video_writer: cv2.VideoWriter | None,
     episode_name: str,
     task_name: str,
     primitive_label: str,
@@ -410,8 +424,10 @@ def _wait_after_primitive(
         return
     deadline = time.time() + settle_s
     while time.time() < deadline:
+        frame = frame_buffer.read()
+        if video_writer is not None:
+            video_writer.write(frame)
         if live_preview:
-            frame = frame_buffer.read()
             dashboard = _draw_execution_preview(
                 frame,
                 episode_name=episode_name,
@@ -424,6 +440,26 @@ def _wait_after_primitive(
             cv2.waitKey(50)
         else:
             time.sleep(min(0.05, max(0.0, deadline - time.time())))
+
+
+def _open_episode_video(
+    videos_dir: Path,
+    episode_index: int,
+    episode_name: str,
+    frame: np.ndarray,
+    fps: float,
+) -> tuple[cv2.VideoWriter, Path]:
+    safe_name = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in episode_name)
+    path = videos_dir / f"episode_{episode_index:04d}_{safe_name}.mp4"
+    writer = cv2.VideoWriter(
+        str(path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps,
+        (int(frame.shape[1]), int(frame.shape[0])),
+    )
+    if not writer.isOpened():
+        raise RuntimeError(f"Failed to open episode video writer: {path}")
+    return writer, path
 
 
 def _prompt_accept() -> str:
@@ -481,6 +517,7 @@ def main() -> None:
     output_root = ensure_dir(session_spec.get("output_root", "data/real_v2/transitions"))
     session_dir = ensure_dir(output_root / f"{session_key}_{_timestamp()}")
     frames_dir = ensure_dir(session_dir / "frames")
+    videos_dir = ensure_dir(session_dir / "videos")
 
     task_name = str(session_spec["task"])
     task_id = int(TASK_TO_ID[task_name])
@@ -490,6 +527,8 @@ def main() -> None:
     auto_accept = bool(session_spec.get("auto_accept", False))
     save_preview = bool(session_spec.get("save_preview", False))
     live_preview = bool(session_spec.get("live_preview", False))
+    record_episode_video = bool(session_spec.get("record_episode_video", False))
+    episode_video_fps = float(session_spec.get("episode_video_fps", 10.0))
     post_primitive_settle_s = float(session_spec.get("post_primitive_settle_s", 1.5))
     reset_between_episodes = bool(session_spec.get("reset_between_episodes", deploy_cfg.get("safety", {}).get("reset_before_episode", True)))
     operator = str(session_spec.get("operator", ""))
@@ -563,11 +602,24 @@ def main() -> None:
             local_frame_paths: list[str] = []
             local_next_frame_paths: list[str] = []
             local_step_records: list[dict[str, Any]] = []
+            local_video_path: str | None = None
+            video_writer: cv2.VideoWriter | None = None
 
             for step_index, primitive_idx in enumerate(primitive_sequence):
                 before = frame_buffer.read()
                 if frame_size is None:
                     frame_size = (int(before.shape[1]), int(before.shape[0]))
+                if record_episode_video and video_writer is None:
+                    video_writer, video_path = _open_episode_video(
+                        videos_dir,
+                        episode_index=episode_index,
+                        episode_name=episode_name,
+                        frame=before,
+                        fps=episode_video_fps,
+                    )
+                    local_video_path = str(video_path)
+                if video_writer is not None:
+                    video_writer.write(before)
                 stage_before = supervision_stage_id(task_id, primitive_idx)
                 state = build_runtime_state(
                     current_q=current_q,
@@ -575,11 +627,13 @@ def main() -> None:
                     step_idx=step_index,
                     horizon=len(primitive_sequence),
                 )
-                if live_preview:
+                if live_preview or video_writer is not None:
                     result = _run_primitive_with_live_preview(
                         runner,
                         frame_buffer,
                         primitive_idx,
+                        live_preview=live_preview,
+                        video_writer=video_writer,
                         episode_name=episode_name,
                         task_name=task_name,
                         step_index=step_index,
@@ -594,6 +648,7 @@ def main() -> None:
                     frame_buffer,
                     settle_s=post_primitive_settle_s,
                     live_preview=live_preview,
+                    video_writer=video_writer,
                     episode_name=episode_name,
                     task_name=task_name,
                     primitive_label=primitive_label,
@@ -601,6 +656,8 @@ def main() -> None:
                     total_steps=len(primitive_sequence),
                 )
                 after = frame_buffer.read()
+                if video_writer is not None:
+                    video_writer.write(after)
                 next_state = build_runtime_state(
                     current_q=current_q,
                     task_id=task_id,
@@ -638,6 +695,9 @@ def main() -> None:
                 if result.done:
                     break
 
+            if video_writer is not None:
+                video_writer.release()
+
             decision = "keep" if auto_accept else _prompt_accept()
             if decision == "quit":
                 break
@@ -670,6 +730,7 @@ def main() -> None:
                     "next_frame_paths": local_next_frame_paths,
                     "steps_executed": len(local_primitives),
                     "task": task_name,
+                    "video_path": local_video_path,
                 }
             )
             next_episode_id += 1
@@ -721,6 +782,8 @@ def main() -> None:
         "primitive_sleep_s": float(deploy_cfg.get("runtime", {}).get("primitive_sleep_s", 0.8)),
         "post_primitive_settle_s": post_primitive_settle_s,
         "live_preview": live_preview,
+        "record_episode_video": record_episode_video,
+        "episode_video_fps": episode_video_fps,
         "session_key": session_key,
         "session_dir": str(session_dir),
         "session_dataset_path": str(dataset_path),

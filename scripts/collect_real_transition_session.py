@@ -553,8 +553,11 @@ def main() -> None:
     frame_buffer = CameraFrameBuffer(runner.camera)
     next_episode_id = 0
 
+    planned_episode_index = 0
     try:
-        for episode_index, episode_spec in enumerate(episodes):
+        while planned_episode_index < len(episodes):
+            episode_index = planned_episode_index
+            episode_spec = episodes[planned_episode_index]
             episode_name = f"{episode_spec['name']}_r{episode_spec['repeat_idx']:02d}"
             layout_tag = str(episode_spec.get("layout_tag", "unspecified"))
             primitive_sequence = list(episode_spec["primitive_ids"])
@@ -702,7 +705,7 @@ def main() -> None:
             if decision == "quit":
                 break
             if decision == "redo":
-                print(f"redo_episode={episode_name}")
+                print(f"redo_episode={episode_name}; retrying same planned episode")
                 continue
 
             for step_index, primitive_idx in enumerate(local_primitives):
@@ -734,6 +737,7 @@ def main() -> None:
                 }
             )
             next_episode_id += 1
+            planned_episode_index += 1
     finally:
         frame_buffer.close()
         runner.close()

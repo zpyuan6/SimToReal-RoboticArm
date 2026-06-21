@@ -124,7 +124,13 @@ def _filter_dataset(input_path: Path, output_path: Path, drop_ids: set[int]) -> 
             output_payload[key] = values
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(output_path, **output_payload)
+    if input_path.resolve() == output_path.resolve():
+        tmp_path = output_path.with_name(f"{output_path.name}.tmp")
+        with tmp_path.open("wb") as handle:
+            np.savez(handle, **output_payload)
+        tmp_path.replace(output_path)
+    else:
+        np.savez(output_path, **output_payload)
     dropped_transitions = before_transitions - after_transitions
     return before_transitions, after_transitions, dropped_transitions
 

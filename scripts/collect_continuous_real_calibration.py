@@ -373,6 +373,11 @@ def main() -> None:
     spec, session_key = _session_spec(args)
     cfg = load_config(spec.get("config", "configs/continuous_act_jointtarget_staged_frozen_best.yaml"))
     deploy_cfg = load_config(spec.get("deploy_config", "configs/deployment_l3.yaml"))
+    deploy_cfg.setdefault("serial", {})
+    if "motion_spd" in spec:
+        deploy_cfg["serial"]["spd"] = int(spec["motion_spd"])
+    if "motion_acc" in spec:
+        deploy_cfg["serial"]["acc"] = int(spec["motion_acc"])
     image_hw = _image_shape_from_config(cfg)
     output_root = ensure_dir(spec.get("output_root", "data/real_continuous_v1/sessions"))
     session_dir = ensure_dir(output_root / f"{session_key}_{_timestamp()}")
@@ -533,6 +538,8 @@ def main() -> None:
         "object_name": spec.get("object_name", ""),
         "dropzone_name": spec.get("dropzone_name", ""),
         "action_formats": selected_formats,
+        "motion_spd": deploy_cfg.get("serial", {}).get("spd"),
+        "motion_acc": deploy_cfg.get("serial", {}).get("acc"),
         "max_joint_step_rad": max_step,
         "step_sleep_s": step_sleep_s,
         "reset_settle_s": reset_settle_s,

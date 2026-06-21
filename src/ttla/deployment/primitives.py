@@ -27,9 +27,9 @@ from ..sim.skills import (
 # poses were tuned for MuJoCo task logic, while the real arm follows the vendor's
 # documented zero positions and joint directions.
 REAL_HOME_QPOS = np.deg2rad(np.asarray([0.0, 0.0, 90.0, 0.0, 0.0, 170.0], dtype=np.float32))
-REAL_OBS_CENTER_QPOS = np.deg2rad(np.asarray([0.0, 12.0, 2.6, 18.0, 0.0, 158.0], dtype=np.float32))
-REAL_OBS_LEFT_QPOS = np.deg2rad(np.asarray([30.0, 12.0, 2.6, 18.0, 0.0, 158.0], dtype=np.float32))
-REAL_OBS_RIGHT_QPOS = np.deg2rad(np.asarray([-30.0, 12.0, 2.6, 18.0, 0.0, 158.0], dtype=np.float32))
+REAL_OBS_CENTER_QPOS = np.deg2rad(np.asarray([0.0, 12.0, 177.4, 18.0, 0.0, 158.0], dtype=np.float32))
+REAL_OBS_LEFT_QPOS = np.deg2rad(np.asarray([30.0, 12.0, 177.4, 18.0, 0.0, 158.0], dtype=np.float32))
+REAL_OBS_RIGHT_QPOS = np.deg2rad(np.asarray([-30.0, 12.0, 177.4, 18.0, 0.0, 158.0], dtype=np.float32))
 REAL_APPROACH_QPOS = np.deg2rad(np.asarray([0.0, 13.4, 111.7, 29.4, 0.0, 154.0], dtype=np.float32))
 REAL_PREGRASP_QPOS = np.deg2rad(np.asarray([0.0, 21.0, 114.0, -1.0, 0.0, 156.0], dtype=np.float32))
 REAL_LIFT_QPOS = np.deg2rad(np.asarray([0.0, -8.0, 96.0, -8.0, 0.0, 180.0], dtype=np.float32))

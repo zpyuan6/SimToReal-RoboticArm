@@ -210,6 +210,34 @@ def _draw_live_preview(
     return np.concatenate([view, panel], axis=1)
 
 
+def _draw_execution_preview(
+    frame: np.ndarray,
+    episode_name: str,
+    task_name: str,
+    primitive_label: str,
+    step_index: int,
+    total_steps: int,
+) -> np.ndarray:
+    view = cv2.resize(frame, (800, 600))
+    panel = np.full((600, 460, 3), 246, dtype=np.uint8)
+
+    def _put(text: str, y: int, scale: float = 0.58, color: tuple[int, int, int] = (36, 40, 48), thickness: int = 1) -> int:
+        cv2.putText(panel, text, (18, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, lineType=cv2.LINE_AA)
+        return y + 30
+
+    y = 36
+    y = _put("Real Collection Execution", y, 0.82, (24, 28, 36), 2)
+    y += 10
+    y = _put(f"Episode: {episode_name}", y)
+    y = _put(f"Task: {task_name}", y)
+    y = _put(f"Step: {step_index + 1}/{total_steps}", y)
+    y = _put(f"Primitive: {primitive_label}", y, 0.62, (52, 64, 92), 1)
+    y += 14
+    y = _put("Live camera continues during motion.", y, 0.52, (52, 64, 92), 1)
+    y = _put("Terminal stays in control for keep/redo.", y, 0.48, (76, 82, 94), 1)
+    return np.concatenate([view, panel], axis=1)
+
+
 def _preview_and_confirm_start(
     runner: DeploymentRunner,
     episode_name: str,
@@ -255,6 +283,54 @@ def _preview_and_confirm_start(
         return bool(decision["continue"])
     finally:
         input_thread.join(timeout=0.1)
+
+
+def _run_primitive_with_live_preview(
+    runner: DeploymentRunner,
+    primitive_idx: int,
+    episode_name: str,
+    task_name: str,
+    step_index: int,
+    total_steps: int,
+) -> Any:
+    result_box: dict[str, Any] = {}
+    done_event = threading.Event()
+
+    def _run() -> None:
+        try:
+            result_box["result"] = runner.executor.run(primitive_idx)
+        finally:
+            done_event.set()
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    primitive_label = primitive_name(primitive_idx)
+    while not done_event.is_set():
+        frame = runner.camera.read()
+        dashboard = _draw_execution_preview(
+            frame,
+            episode_name=episode_name,
+            task_name=task_name,
+            primitive_label=primitive_label,
+            step_index=step_index,
+            total_steps=total_steps,
+        )
+        cv2.imshow(PREVIEW_WINDOW_NAME, dashboard)
+        cv2.waitKey(50)
+
+    worker.join(timeout=0.1)
+    frame = runner.camera.read()
+    dashboard = _draw_execution_preview(
+        frame,
+        episode_name=episode_name,
+        task_name=task_name,
+        primitive_label=primitive_label,
+        step_index=step_index,
+        total_steps=total_steps,
+    )
+    cv2.imshow(PREVIEW_WINDOW_NAME, dashboard)
+    cv2.waitKey(1)
+    return result_box["result"]
 
 
 def _prompt_accept() -> str:
@@ -383,7 +459,14 @@ def main() -> None:
                     step_idx=step_index,
                     horizon=len(primitive_sequence),
                 )
-                result = runner.executor.run(primitive_idx)
+                result = _run_primitive_with_live_preview(
+                    runner,
+                    primitive_idx,
+                    episode_name=episode_name,
+                    task_name=task_name,
+                    step_index=step_index,
+                    total_steps=len(primitive_sequence),
+                )
                 current_q = runner.executor.current_q.copy()
                 flags.apply(primitive_idx)
                 after = runner.camera.read()

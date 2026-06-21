@@ -26,6 +26,7 @@ JOINT_LIMITS = {
     # monitor aligned with that range instead of the older narrow debug band.
     "e": (0.0, float(np.pi)),
 }
+FEEDBACK_KEYS = ("b", "s", "e", "t", "r", "h")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -51,6 +52,19 @@ def _append_jsonl(path: Path, payload: dict) -> None:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def _parse_feedback_joints(payload: str) -> dict[str, float] | None:
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    joints: dict[str, float] = {}
+    for key in FEEDBACK_KEYS:
+        value = data.get(key)
+        if isinstance(value, (int, float)):
+            joints[key] = float(value)
+    return joints or None
+
+
 def _snapshot_path(session_dir: Path, count: int) -> Path:
     return session_dir / f"snapshot_{count:03d}.png"
 
@@ -61,6 +75,7 @@ def _draw_panel(
     targets: dict[str, float],
     last_command: str,
     last_feedback: str,
+    last_feedback_joints: dict[str, float] | None,
     serial_enabled: bool,
     snapshot_count: int,
 ) -> np.ndarray:
@@ -70,9 +85,9 @@ def _draw_panel(
     panel = np.full((480, 360, 3), 248, dtype=np.uint8)
     lines = [
         f"Serial: {'enabled' if serial_enabled else 'camera-only'}",
-        f"Base target: {targets['b']:.2f}",
-        f"Shoulder target: {targets['s']:.2f}",
-        f"Elbow target: {targets['e']:.2f}",
+        f"Base target: {np.rad2deg(targets['b']):.1f} deg",
+        f"Shoulder target: {np.rad2deg(targets['s']):.1f} deg",
+        f"Elbow target: {np.rad2deg(targets['e']):.1f} deg",
         f"Snapshots: {snapshot_count}",
         f"Session: {session_dir.name}",
         "Controls:",
@@ -85,6 +100,16 @@ def _draw_panel(
     for line in lines:
         cv2.putText(panel, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (35, 35, 35), 1)
         y += 24
+
+    if last_feedback_joints:
+        feedback_lines = [
+            f"Feedback b: {last_feedback_joints.get('b', float('nan')):.1f} deg",
+            f"Feedback s: {last_feedback_joints.get('s', float('nan')):.1f} deg",
+            f"Feedback e: {last_feedback_joints.get('e', float('nan')):.1f} deg",
+        ]
+        for line in feedback_lines:
+            cv2.putText(panel, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (24, 92, 56), 1)
+            y += 22
 
     cv2.putText(panel, "Last command", (12, 320), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (35, 35, 35), 1)
     cv2.putText(panel, last_command[:44], (12, 346), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (55, 55, 55), 1)
@@ -112,13 +137,23 @@ def main() -> None:
     targets = dict(DEFAULT_TARGET)
     last_command = "none"
     last_feedback = "none"
+    last_feedback_joints: dict[str, float] | None = None
     snapshot_count = 0
     delay = max(1, int(1000 / max(args.fps, 1e-3)))
 
     try:
         while True:
             frame = camera.read()
-            dashboard = _draw_panel(frame, session_dir, targets, last_command, last_feedback, serial_enabled, snapshot_count)
+            dashboard = _draw_panel(
+                frame,
+                session_dir,
+                targets,
+                last_command,
+                last_feedback,
+                last_feedback_joints,
+                serial_enabled,
+                snapshot_count,
+            )
             cv2.imshow(WINDOW_NAME, dashboard)
             key = cv2.waitKey(delay) & 0xFF
 
@@ -126,6 +161,9 @@ def main() -> None:
                 unsolicited = robot.read_line()
                 if unsolicited:
                     last_feedback = unsolicited
+                    parsed_feedback = _parse_feedback_joints(unsolicited)
+                    if parsed_feedback:
+                        last_feedback_joints = parsed_feedback
                     _append_jsonl(log_path, {"ts": time.time(), "event": "serial_in", "payload": unsolicited})
 
             if key == 255:
@@ -148,6 +186,9 @@ def main() -> None:
                 feedback = robot.request_feedback()
                 if feedback:
                     last_feedback = feedback
+                    parsed_feedback = _parse_feedback_joints(feedback)
+                    if parsed_feedback:
+                        last_feedback_joints = parsed_feedback
                     _append_jsonl(log_path, {"ts": time.time(), "event": "feedback", "payload": feedback})
                 continue
 

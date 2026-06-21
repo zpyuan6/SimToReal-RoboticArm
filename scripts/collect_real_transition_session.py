@@ -220,10 +220,27 @@ def _preview_and_confirm_start(
 ) -> bool:
     cv2.namedWindow(PREVIEW_WINDOW_NAME, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_EXPANDED)
     cv2.resizeWindow(PREVIEW_WINDOW_NAME, 1280, 680)
-    stop_event = threading.Event()
+    decision_ready = threading.Event()
+    decision: dict[str, bool] = {"continue": False}
 
-    def _preview_loop() -> None:
-        while not stop_event.is_set():
+    print()
+    print(f"[{episode_name}] task={task_name} layout={layout_tag}")
+    print("Sequence:", " -> ".join(primitive_name(pid) for pid in primitive_sequence))
+    if placement_guide:
+        print("Placement guide:")
+        for guide in placement_guide:
+            print(f"  - {guide}")
+
+    def _read_terminal_decision() -> None:
+        try:
+            decision["continue"] = _prompt_continue("Check the preview window, then press Enter to execute or q to stop: ")
+        finally:
+            decision_ready.set()
+
+    input_thread = threading.Thread(target=_read_terminal_decision, daemon=True)
+    input_thread.start()
+    try:
+        while not decision_ready.is_set():
             frame = runner.camera.read()
             dashboard = _draw_live_preview(
                 frame,
@@ -235,21 +252,9 @@ def _preview_and_confirm_start(
             )
             cv2.imshow(PREVIEW_WINDOW_NAME, dashboard)
             cv2.waitKey(50)
-
-    thread = threading.Thread(target=_preview_loop, daemon=True)
-    thread.start()
-    print()
-    print(f"[{episode_name}] task={task_name} layout={layout_tag}")
-    print("Sequence:", " -> ".join(primitive_name(pid) for pid in primitive_sequence))
-    if placement_guide:
-        print("Placement guide:")
-        for guide in placement_guide:
-            print(f"  - {guide}")
-    try:
-        return _prompt_continue("Check the preview window, then press Enter to execute or q to stop: ")
+        return bool(decision["continue"])
     finally:
-        stop_event.set()
-        thread.join(timeout=1.0)
+        input_thread.join(timeout=0.1)
 
 
 def _prompt_accept() -> str:

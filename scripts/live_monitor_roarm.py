@@ -18,9 +18,13 @@ from ttla.utils.io import ensure_dir
 WINDOW_NAME = "RoArm Live Monitor"
 DEFAULT_TARGET = {"b": 0.0, "s": 0.0, "e": 1.4}
 JOINT_LIMITS = {
-    "b": (-1.0, 1.0),
-    "s": (-0.7, 0.8),
-    "e": (0.6, 1.8),
+    # RoArm base is documented over roughly -180..180 deg.
+    "b": (-float(np.pi), float(np.pi)),
+    # RoArm shoulder is documented over roughly -90..90 deg.
+    "s": (-float(np.pi / 2.0), float(np.pi / 2.0)),
+    # RoArm elbow is documented over roughly 0..180 deg; keep the manual
+    # monitor aligned with that range instead of the older narrow debug band.
+    "e": (0.0, float(np.pi)),
 }
 
 

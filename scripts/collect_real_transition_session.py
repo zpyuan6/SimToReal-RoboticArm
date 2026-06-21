@@ -106,6 +106,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--auto-accept", action="store_true")
     parser.add_argument("--save-preview", action="store_true")
     parser.add_argument("--live-preview", action="store_true", help="Show the OpenCV live preview window during collection.")
+    parser.add_argument("--post-primitive-settle-s", type=float, default=None, help="Extra settle time after each primitive before capturing the after-frame.")
     return parser.parse_args()
 
 
@@ -182,6 +183,8 @@ def _load_plan_session(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
         merged["save_preview"] = True
     if args.live_preview:
         merged["live_preview"] = True
+    if args.post_primitive_settle_s is not None:
+        merged["post_primitive_settle_s"] = float(args.post_primitive_settle_s)
     return merged, args.session
 
 
@@ -393,6 +396,36 @@ def _run_primitive_with_live_preview(
     return result_box["result"]
 
 
+def _wait_after_primitive(
+    frame_buffer: CameraFrameBuffer,
+    settle_s: float,
+    live_preview: bool,
+    episode_name: str,
+    task_name: str,
+    primitive_label: str,
+    step_index: int,
+    total_steps: int,
+) -> None:
+    if settle_s <= 0:
+        return
+    deadline = time.time() + settle_s
+    while time.time() < deadline:
+        if live_preview:
+            frame = frame_buffer.read()
+            dashboard = _draw_execution_preview(
+                frame,
+                episode_name=episode_name,
+                task_name=task_name,
+                primitive_label=f"{primitive_label} settling",
+                step_index=step_index,
+                total_steps=total_steps,
+            )
+            cv2.imshow(PREVIEW_WINDOW_NAME, dashboard)
+            cv2.waitKey(50)
+        else:
+            time.sleep(min(0.05, max(0.0, deadline - time.time())))
+
+
 def _prompt_accept() -> str:
     while True:
         answer = input("Keep this episode [k], redo [r], or quit [q]? ").strip().lower()
@@ -452,6 +485,7 @@ def main() -> None:
     auto_accept = bool(session_spec.get("auto_accept", False))
     save_preview = bool(session_spec.get("save_preview", False))
     live_preview = bool(session_spec.get("live_preview", False))
+    post_primitive_settle_s = float(session_spec.get("post_primitive_settle_s", 1.5))
     reset_between_episodes = bool(session_spec.get("reset_between_episodes", deploy_cfg.get("safety", {}).get("reset_before_episode", True)))
     operator = str(session_spec.get("operator", ""))
     notes = str(session_spec.get("notes", ""))
@@ -550,6 +584,17 @@ def main() -> None:
                     result = runner.executor.run(primitive_idx)
                 current_q = runner.executor.current_q.copy()
                 flags.apply(primitive_idx)
+                primitive_label = primitive_name(primitive_idx)
+                _wait_after_primitive(
+                    frame_buffer,
+                    settle_s=post_primitive_settle_s,
+                    live_preview=live_preview,
+                    episode_name=episode_name,
+                    task_name=task_name,
+                    primitive_label=primitive_label,
+                    step_index=step_index,
+                    total_steps=len(primitive_sequence),
+                )
                 after = frame_buffer.read()
                 next_state = build_runtime_state(
                     current_q=current_q,
@@ -557,7 +602,6 @@ def main() -> None:
                     step_idx=step_index + 1,
                     horizon=len(primitive_sequence),
                 )
-                primitive_label = primitive_name(primitive_idx)
                 before_path = frames_dir / f"episode_{episode_index:04d}_step_{step_index:03d}_before_{primitive_label}.jpg"
                 after_path = frames_dir / f"episode_{episode_index:04d}_step_{step_index:03d}_after_{primitive_label}.jpg"
                 cv2.imwrite(str(before_path), before)
@@ -670,6 +714,7 @@ def main() -> None:
         "config_path": session_spec.get("config", args.config),
         "deploy_config_path": session_spec.get("deploy_config", args.deploy_config),
         "primitive_sleep_s": float(deploy_cfg.get("runtime", {}).get("primitive_sleep_s", 0.8)),
+        "post_primitive_settle_s": post_primitive_settle_s,
         "live_preview": live_preview,
         "session_key": session_key,
         "session_dir": str(session_dir),

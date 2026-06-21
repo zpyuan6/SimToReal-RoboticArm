@@ -32,10 +32,11 @@ REAL_OBS_LEFT_QPOS = np.asarray([np.deg2rad(30.0), np.deg2rad(12.0), 2.6, np.deg
 REAL_OBS_RIGHT_QPOS = np.asarray([np.deg2rad(-30.0), np.deg2rad(12.0), 2.6, np.deg2rad(18.0), 0.0, np.deg2rad(158.0)], dtype=np.float32)
 REAL_APPROACH_QPOS = np.deg2rad(np.asarray([0.0, 32.1, 130.6, -32.1, 0.0, 154.0], dtype=np.float32))
 REAL_RETREAT_ARM_QPOS = np.deg2rad(np.asarray([0.0, 13.8, 149.0, -32.1, 0.0], dtype=np.float32))
-REAL_PREGRASP_QPOS = np.deg2rad(np.asarray([0.0, 21.0, 114.0, -1.0, 0.0, 156.0], dtype=np.float32))
+REAL_GRASP_ARM_QPOS = np.deg2rad(np.asarray([0.0, 33.8, 130.6, -36.7, 0.0], dtype=np.float32))
+REAL_PREGRASP_QPOS = np.deg2rad(np.asarray([0.0, 33.8, 130.6, -36.7, 0.0, 156.0], dtype=np.float32))
 REAL_LIFT_QPOS = np.deg2rad(np.asarray([0.0, -8.0, 96.0, -8.0, 0.0, 180.0], dtype=np.float32))
-REAL_TRANSPORT_QPOS = np.deg2rad(np.asarray([-20.0, 6.0, 139.0, -12.0, 0.0, 180.0], dtype=np.float32))
-REAL_PLACE_RELEASE_QPOS = np.deg2rad(np.asarray([-20.0, 10.0, 148.0, -8.0, 0.0, 180.0], dtype=np.float32))
+REAL_TRANSPORT_QPOS = np.deg2rad(np.asarray([-45.8, 20.0, 135.2, -36.7, 0.0, 180.0], dtype=np.float32))
+REAL_PLACE_RELEASE_QPOS = np.deg2rad(np.asarray([-45.8, 20.0, 135.2, -36.7, 0.0, 180.0], dtype=np.float32))
 REAL_GRIPPER_HOME_QPOS = np.deg2rad(np.float32(170.0))
 REAL_GRIPPER_OPEN_QPOS = np.deg2rad(np.float32(60.0))
 REAL_GRIPPER_CLOSED_QPOS = np.deg2rad(np.float32(180.0))
@@ -76,9 +77,9 @@ class PrimitiveExecutor:
             self._goto(REAL_PREGRASP_QPOS)
             return PrimitiveResult(True, False, False, {"primitive_name": name})
         if primitive_id_value == GRASP_EXECUTE_ID:
-            # Grasp execute is now a pure close-gripper primitive. Any final
-            # target-relative positioning should already have happened during
-            # approach/pregrasp, not here.
+            # Keep the arm at the measured grasp pose before closing. This
+            # avoids the older pre-close lift that moved the gripper off target.
+            self._goto_arm_preserve_gripper(REAL_GRASP_ARM_QPOS)
             self._set_gripper(REAL_GRIPPER_CLOSED_QPOS)
             return PrimitiveResult(True, False, False, {"primitive_name": name})
         if primitive_id_value == LIFT_OBJECT_ID:

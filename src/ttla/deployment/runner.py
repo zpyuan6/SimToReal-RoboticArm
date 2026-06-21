@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import cv2
 import numpy as np
-import torch
 
-from ..models import TTLAModel
 from ..sim.skills import HOME_QPOS, primitive_name
 from ..task_runtime import build_runtime_state
 from ..utils.io import ensure_dir, write_json
@@ -15,16 +14,21 @@ from .camera import USBCamera
 from .primitives import PrimitiveExecutor
 from .roarm_serial import RoArmSerialClient
 
+if TYPE_CHECKING:
+    import torch
+    from ..models import TTLAModel
+
 
 class DeploymentRunner:
-    def __init__(self, deploy_cfg: dict, model: TTLAModel | None = None, device: str = "cpu") -> None:
+    def __init__(self, deploy_cfg: dict, model: "TTLAModel | None" = None, device: str = "cpu") -> None:
         self.cfg = deploy_cfg
         self.camera = USBCamera(**deploy_cfg["camera"])
         self.robot = RoArmSerialClient(**deploy_cfg["serial"])
         self.executor = PrimitiveExecutor(self.robot, deploy_cfg.get("runtime", {}))
         self.log_dir = ensure_dir(deploy_cfg["runtime"]["log_dir"])
         self.model = model
-        self.device = torch.device(device)
+        self.device_spec = device
+        self.device: Any | None = None
 
     def run_probe_episode(self, episode_name: str = "probe_episode") -> Path:
         episode_dir = ensure_dir(self.log_dir / episode_name)
@@ -65,6 +69,10 @@ class DeploymentRunner:
     def run_policy_episode(self, task_id: int, episode_name: str = "policy_episode") -> Path:
         if self.model is None:
             raise ValueError("DeploymentRunner.run_policy_episode requires a loaded model.")
+        import torch
+
+        if self.device is None:
+            self.device = torch.device(self.device_spec)
         episode_dir = ensure_dir(self.log_dir / episode_name)
         self.robot.reset_pose()
         time.sleep(1.5)

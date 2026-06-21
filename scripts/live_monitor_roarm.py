@@ -62,12 +62,6 @@ def _parse_feedback_joints(payload: str) -> dict[str, float] | None:
         value = data.get(key)
         if isinstance(value, (int, float)):
             joints[key] = float(value)
-    if "e" in joints:
-        # The RoArm feedback for elbow is reported in the opposite sense from
-        # the command-side angle convention we use in deployment poses. Convert
-        # it here so the live monitor shows angles in the same convention that
-        # primitive constants use.
-        joints["e"] = 180.0 - joints["e"]
     return joints or None
 
 

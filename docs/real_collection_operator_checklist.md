@@ -263,7 +263,7 @@ Reject the session and recollect if:
 Run:
 
 ```powershell
-uv run python scripts\merge_real_transition_sessions.py --root data/real_v2/transitions --output-dir data/real_v2/merged
+uv run python scripts\merge_real_transition_sessions.py --root data/real_v2/transitions --output-dir data/real_v2/merged --plan configs/real_collection_plan_v2.yaml
 ```
 
 Expected result:
@@ -274,11 +274,22 @@ Expected result:
 - `data/real_v2/merged/heldout_sessions.csv`
 - `data/real_v2/merged/calibration_meta.json`
 - `data/real_v2/merged/heldout_meta.json`
+- `data/real_v2/merged/collection_status_by_session.csv`
+- `data/real_v2/merged/collection_status_by_sequence.csv`
 
 Sanity checks:
 
 - calibration and heldout manifests should list different session directories
 - transition counts should be nonzero
+- `missing_episodes` should be 0 for sessions you intend to complete
+
+If a session is short, collect only the missing part instead of repeating the whole protocol. For example:
+
+```powershell
+uv run python scripts\collect_real_transition_session.py --plan configs/real_collection_plan_v2.yaml --session heldout_l3_offset --only-sequences center_pick_place --repeats 1 --operator "<name>"
+```
+
+Then rerun the merge command. The merge step rebuilds the merged `.npz` files from all session directories, so newly collected supplemental sessions are automatically included.
 
 ## Step 5: run held-out transition validation
 

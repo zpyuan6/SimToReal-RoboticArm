@@ -268,7 +268,7 @@ Use `redo` aggressively. Bad episodes are worse than fewer episodes.
 
 ```powershell
 $env:UV_CACHE_DIR='F:\RoboticArm\.uv-cache'
-uv run python scripts\merge_real_transition_sessions.py --root data/real_v2/transitions --output-dir data/real_v2/merged
+uv run python scripts\merge_real_transition_sessions.py --root data/real_v2/transitions --output-dir data/real_v2/merged --plan configs/real_collection_plan_v2.yaml
 ```
 
 This writes:
@@ -280,6 +280,17 @@ and manifests:
 
 - `data/real_v2/merged/calibration_sessions.csv`
 - `data/real_v2/merged/heldout_sessions.csv`
+- `data/real_v2/merged/collection_status_by_session.csv`
+- `data/real_v2/merged/collection_status_by_sequence.csv`
+
+If `missing_episodes` is nonzero, supplement only the missing protocol part. Example:
+
+```powershell
+$env:UV_CACHE_DIR='F:\RoboticArm\.uv-cache'
+uv run python scripts\collect_real_transition_session.py --plan configs/real_collection_plan_v2.yaml --session heldout_l3_offset --only-sequences center_pick_place --repeats 1 --operator "<name>"
+```
+
+Then rerun the merge command. Merging rebuilds the output files from all session directories under `data/real_v2/transitions`, so supplemental sessions are folded into the already generated merged dataset.
 
 ## 8. How the collected data are used
 

@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ttla.config import load_config
 from ttla.sim.task_defs import supervision_stage_id
 from ttla.utils.io import ensure_dir, save_npz, write_json
 
@@ -16,6 +17,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True, help="Directory containing collected transition session subdirectories.")
     parser.add_argument("--output-dir", default="data/real_v2/merged")
+    parser.add_argument("--plan", default=None, help="Optional YAML plan used to report missing collection episodes.")
     parser.add_argument("--roles", nargs="*", default=["calibration", "heldout"])
     return parser.parse_args()
 
@@ -74,6 +76,164 @@ def _write_manifest(path: Path, rows: list[dict[str, Any]]) -> None:
     pd.DataFrame.from_records(rows).to_csv(path, index=False)
 
 
+def _sequence_name_from_episode(episode_name: str) -> str:
+    if "_r" not in episode_name:
+        return episode_name
+    return episode_name.rsplit("_r", 1)[0]
+
+
+def _expected_rows_from_plan(plan_path: str | None) -> list[dict[str, Any]]:
+    if plan_path is None:
+        return []
+    plan = load_config(plan_path)
+    shared = plan.get("shared", {})
+    rows: list[dict[str, Any]] = []
+    for session_key, session_spec in plan.get("sessions", {}).items():
+        merged = {**shared, **session_spec}
+        default_repeats = int(merged.get("repeats", 1))
+        for sequence in merged.get("sequences", []):
+            sequence_name = str(sequence.get("name", ""))
+            repeats = int(sequence.get("repeats", default_repeats))
+            rows.append(
+                {
+                    "session_key": str(session_key),
+                    "split_role": str(merged.get("split_role", "")),
+                    "task": str(merged.get("task", "")),
+                    "layout_tag": str(merged.get("layout_tag", "")),
+                    "sequence_name": sequence_name,
+                    "expected_episodes": repeats,
+                }
+            )
+    return rows
+
+
+def _summarize_collection_status(
+    expected_rows: list[dict[str, Any]],
+    session_metas: list[tuple[Path, dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    sequence_counts: dict[tuple[str, str], dict[str, Any]] = {}
+    session_counts: dict[str, dict[str, Any]] = {}
+
+    for session_dir, meta in session_metas:
+        session_key = str(meta.get("session_key", session_dir.name))
+        session_entry = session_counts.setdefault(
+            session_key,
+            {
+                "session_key": session_key,
+                "split_role": str(meta.get("split_role", "")),
+                "task": str(meta.get("task", "")),
+                "layout_tag": str(meta.get("layout_tag", "")),
+                "collected_episodes": 0,
+                "transitions_collected": 0,
+                "session_dirs": [],
+            },
+        )
+        session_entry["collected_episodes"] += int(meta.get("episodes_collected", 0))
+        session_entry["transitions_collected"] += int(meta.get("transitions_collected", 0))
+        session_entry["session_dirs"].append(str(session_dir))
+        for record in meta.get("episode_records", []):
+            sequence_name = _sequence_name_from_episode(str(record.get("episode_name", "")))
+            key = (session_key, sequence_name)
+            entry = sequence_counts.setdefault(
+                key,
+                {
+                    "session_key": session_key,
+                    "split_role": str(meta.get("split_role", "")),
+                    "task": str(meta.get("task", "")),
+                    "layout_tag": str(meta.get("layout_tag", "")),
+                    "sequence_name": sequence_name,
+                    "collected_episodes": 0,
+                    "session_dirs": [],
+                },
+            )
+            entry["collected_episodes"] += 1
+            if str(session_dir) not in entry["session_dirs"]:
+                entry["session_dirs"].append(str(session_dir))
+
+    sequence_rows: list[dict[str, Any]] = []
+    if expected_rows:
+        seen_session_keys = {row["session_key"] for row in expected_rows}
+        for expected in expected_rows:
+            key = (expected["session_key"], expected["sequence_name"])
+            observed = sequence_counts.get(key, {})
+            collected = int(observed.get("collected_episodes", 0))
+            expected_count = int(expected["expected_episodes"])
+            row = {
+                **expected,
+                "collected_episodes": collected,
+                "missing_episodes": max(expected_count - collected, 0),
+                "extra_episodes": max(collected - expected_count, 0),
+                "session_dirs": ";".join(observed.get("session_dirs", [])),
+            }
+            sequence_rows.append(row)
+        for (session_key, sequence_name), observed in sequence_counts.items():
+            if session_key in seen_session_keys:
+                continue
+            collected = int(observed.get("collected_episodes", 0))
+            sequence_rows.append(
+                {
+                    "session_key": session_key,
+                    "split_role": observed.get("split_role", ""),
+                    "task": observed.get("task", ""),
+                    "layout_tag": observed.get("layout_tag", ""),
+                    "sequence_name": sequence_name,
+                    "expected_episodes": 0,
+                    "collected_episodes": collected,
+                    "missing_episodes": 0,
+                    "extra_episodes": collected,
+                    "session_dirs": ";".join(observed.get("session_dirs", [])),
+                }
+            )
+    else:
+        for observed in sequence_counts.values():
+            sequence_rows.append(
+                {
+                    **observed,
+                    "expected_episodes": "",
+                    "missing_episodes": "",
+                    "extra_episodes": "",
+                    "session_dirs": ";".join(observed.get("session_dirs", [])),
+                }
+            )
+
+    session_expected: dict[str, dict[str, Any]] = {}
+    for row in expected_rows:
+        entry = session_expected.setdefault(
+            row["session_key"],
+            {
+                "session_key": row["session_key"],
+                "split_role": row["split_role"],
+                "task": row["task"],
+                "layout_tag": row["layout_tag"],
+                "expected_episodes": 0,
+            },
+        )
+        entry["expected_episodes"] += int(row["expected_episodes"])
+
+    session_rows: list[dict[str, Any]] = []
+    all_session_keys = set(session_expected) | set(session_counts)
+    for session_key in sorted(all_session_keys):
+        expected = session_expected.get(session_key, {})
+        observed = session_counts.get(session_key, {})
+        expected_count = int(expected.get("expected_episodes", 0))
+        collected = int(observed.get("collected_episodes", 0))
+        session_rows.append(
+            {
+                "session_key": session_key,
+                "split_role": expected.get("split_role", observed.get("split_role", "")),
+                "task": expected.get("task", observed.get("task", "")),
+                "layout_tag": expected.get("layout_tag", observed.get("layout_tag", "")),
+                "expected_episodes": expected_count,
+                "collected_episodes": collected,
+                "missing_episodes": max(expected_count - collected, 0),
+                "extra_episodes": max(collected - expected_count, 0),
+                "transitions_collected": int(observed.get("transitions_collected", 0)),
+                "session_dirs": ";".join(observed.get("session_dirs", [])),
+            }
+        )
+    return session_rows, sequence_rows
+
+
 def main() -> None:
     args = _parse_args()
     root = Path(args.root)
@@ -86,9 +246,11 @@ def main() -> None:
 
     sessions_by_role: dict[str, list[dict[str, np.ndarray]]] = {role: [] for role in requested_roles}
     manifests: dict[str, list[dict[str, Any]]] = {role: [] for role in requested_roles}
+    session_metas: list[tuple[Path, dict[str, Any]]] = []
 
     for session_dir in session_dirs:
         meta, payload = _load_session_payload(session_dir)
+        session_metas.append((session_dir, meta))
         split_role = str(meta.get("split_role", ""))
         if split_role not in requested_roles:
             continue
@@ -110,6 +272,22 @@ def main() -> None:
         )
 
     written: dict[str, str] = {}
+    expected_rows = _expected_rows_from_plan(args.plan)
+    status_by_session, status_by_sequence = _summarize_collection_status(expected_rows, session_metas)
+    if status_by_session:
+        _write_manifest(output_dir / "collection_status_by_session.csv", status_by_session)
+    if status_by_sequence:
+        _write_manifest(output_dir / "collection_status_by_sequence.csv", status_by_sequence)
+    write_json(
+        output_dir / "collection_status.json",
+        {
+            "plan_path": args.plan,
+            "source_root": str(root),
+            "sessions": status_by_session,
+            "sequences": status_by_sequence,
+        },
+    )
+
     for role in sorted(requested_roles):
         payloads = sessions_by_role.get(role, [])
         if not payloads:
@@ -127,6 +305,7 @@ def main() -> None:
                 "num_transitions": int(len(merged["primitive_ids"])),
                 "num_episodes": int(len(np.unique(merged["episode_ids"]))),
                 "source_root": str(root),
+                "merge_mode": "rebuild_from_session_directories",
             },
         )
         written[role] = str(output_path)
@@ -136,6 +315,18 @@ def main() -> None:
 
     for role, path in written.items():
         print(f"{role}_merged={path}")
+    missing_rows = [row for row in status_by_session if int(row.get("missing_episodes", 0) or 0) > 0]
+    if missing_rows:
+        print("missing_collection:")
+        for row in missing_rows:
+            print(
+                f"  {row['session_key']}: missing={row['missing_episodes']} "
+                f"collected={row['collected_episodes']}/{row['expected_episodes']}"
+            )
+        print(f"collection_status={output_dir / 'collection_status_by_session.csv'}")
+    elif status_by_session:
+        print("missing_collection: none")
+        print(f"collection_status={output_dir / 'collection_status_by_session.csv'}")
 
 
 if __name__ == "__main__":

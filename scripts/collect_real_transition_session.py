@@ -99,6 +99,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--primitives", default=None, help="Comma-separated primitive names or ids for manual mode.")
     parser.add_argument("--sequence-name", default="manual_sequence")
     parser.add_argument("--repeats", type=int, default=None)
+    parser.add_argument("--only-sequences", nargs="*", default=None, help="Plan mode: collect only these sequence names.")
+    parser.add_argument("--max-episodes", type=int, default=None, help="Plan mode: collect at most this many expanded episodes.")
     parser.add_argument("--operator", default="")
     parser.add_argument("--notes", default="")
     parser.add_argument("--session-tag", default="")
@@ -188,6 +190,13 @@ def _load_plan_session(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
         merged["record_episode_video"] = True
     if args.post_primitive_settle_s is not None:
         merged["post_primitive_settle_s"] = float(args.post_primitive_settle_s)
+    if args.repeats is not None:
+        merged["repeats"] = int(args.repeats)
+    if args.only_sequences:
+        requested = set(args.only_sequences)
+        merged["sequences"] = [sequence for sequence in merged["sequences"] if sequence.get("name") in requested]
+        if not merged["sequences"]:
+            raise ValueError(f"No sequences matched --only-sequences: {sorted(requested)}")
     return merged, args.session
 
 
@@ -523,6 +532,8 @@ def main() -> None:
     task_id = int(TASK_TO_ID[task_name])
     split_role = str(session_spec["split_role"])
     episodes = _expand_episodes(session_spec)
+    if args.max_episodes is not None:
+        episodes = episodes[: max(0, int(args.max_episodes))]
     auto_start = bool(session_spec.get("auto_start", False))
     auto_accept = bool(session_spec.get("auto_accept", False))
     save_preview = bool(session_spec.get("save_preview", False))

@@ -10,6 +10,9 @@ shared:
   step_sleep_s: 0.25
   reset_settle_s: 1.5
   post_episode_settle_s: 1.5
+  waypoint_settle_s:
+    grasp_close: 2.0
+    place_release: 1.0
   reset_between_episodes: true
   auto_start: false
   auto_accept: false

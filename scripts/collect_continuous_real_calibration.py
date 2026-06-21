@@ -49,7 +49,6 @@ STATIC_POSES = {
     "pregrasp": REAL_PREGRASP_QPOS,
     "lift": REAL_LIFT_QPOS,
     "transport": REAL_TRANSPORT_QPOS,
-    "place_release": REAL_PLACE_RELEASE_QPOS,
 }
 
 RETREAT_DELTA = np.asarray([0.0, 0.10, 0.14, -0.06, 0.0, 0.10], dtype=np.float32)
@@ -200,6 +199,10 @@ def _pose_for_waypoint(name: str, current_q: np.ndarray) -> np.ndarray:
     key = str(name)
     if key in STATIC_POSES:
         return np.asarray(STATIC_POSES[key], dtype=np.float32).copy()
+    if key == "place_release":
+        q = np.asarray(REAL_PLACE_RELEASE_QPOS, dtype=np.float32).copy()
+        q[5] = float(REAL_GRIPPER_OPEN_QPOS)
+        return q
     if key == "grasp_close":
         q = np.asarray(current_q, dtype=np.float32).copy()
         q[5] = float(REAL_GRIPPER_CLOSED_QPOS)
@@ -395,6 +398,7 @@ def main() -> None:
     live_preview = bool(spec.get("live_preview", True))
     reset_settle_s = float(spec.get("reset_settle_s", 1.5 if not args.dry_run else 0.1))
     post_episode_settle_s = float(spec.get("post_episode_settle_s", 1.5 if not args.dry_run else 0.1))
+    waypoint_settle_s = {str(key): float(value) for key, value in spec.get("waypoint_settle_s", {}).items()}
     selected_formats = _action_formats(str(spec.get("action_format", "both")))
 
     if args.dry_run:
@@ -447,7 +451,11 @@ def main() -> None:
                         horizon=len(planned),
                     )
                     robot.move_joint_vector(target_q)
-                    _sleep_with_live_preview(camera, step_sleep_s, live_preview)
+                    is_final_waypoint_step = (
+                        local_step == len(planned) - 1 or planned[local_step + 1][0] != waypoint_name
+                    )
+                    extra_settle_s = waypoint_settle_s.get(waypoint_name, 0.0) if is_final_waypoint_step else 0.0
+                    _sleep_with_live_preview(camera, step_sleep_s + extra_settle_s, live_preview)
                     after = camera.read()
                     _show_live_frame(after, live_preview)
                     after_dataset = _dataset_frame(after, image_hw)
@@ -544,6 +552,7 @@ def main() -> None:
         "step_sleep_s": step_sleep_s,
         "reset_settle_s": reset_settle_s,
         "post_episode_settle_s": post_episode_settle_s,
+        "waypoint_settle_s": waypoint_settle_s,
         "episodes_collected": len(episode_meta),
         "transitions_collected": len(all_records),
         "dry_run": bool(args.dry_run),
